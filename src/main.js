@@ -2623,6 +2623,7 @@ if (testMode) {
   });
 }
 
+if (testMode) state.settings = { ...state.settings, quality: 'low', shadows: false, postProcessing: false };
 resetWeapons();
 $('#setting-quality').querySelector('[value="ultra"]').disabled = capabilities.profile !== 'high' && !capabilities.webgpu;
 $('#setting-fov').value = state.settings.fov;
