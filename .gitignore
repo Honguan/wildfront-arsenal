@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.serena/
+playwright-report/
+test-results/
+.playwright-mcp/

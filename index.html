@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#07130f" />
+    <link rel="icon" href="data:," />
+    <title>Wildfront Arsenal</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <section id="loading" class="loading-screen" aria-live="polite">
+      <p class="eyebrow">WILDFRONT ARSENAL</p>
+      <h1>Initializing...</h1>
+      <progress id="loading-progress" max="100" value="10">10%</progress>
+      <p id="loading-status">Checking hardware...</p>
+      <div id="loading-error" class="hidden" role="alert">
+        <p>Failed to load required game data.</p>
+        <button id="retry-loading" class="primary">Retry</button>
+        <button id="clear-cache">Clear Cache</button>
+        <button id="return-loading">Return</button>
+      </div>
+    </section>
+    <canvas id="game" aria-label="Wildfront Arsenal 3D 遊戲畫面"></canvas>
+
+    <main id="menu" class="panel screen">
+      <p class="eyebrow">ROGUELITE FPS</p>
+      <h1>WILDFRONT<br /><span>ARSENAL</span></h1>
+      <p class="lead">穿越多變戰區。切換武器、撐過波次，讓地圖、天氣與升級改變你的打法。</p>
+      <div class="setup-grid">
+        <div>
+          <label for="mode">模式</label>
+          <select id="mode">
+            <option value="survival">Survival — 無限生存</option>
+            <option value="hunt">Hunt — Elite 獵殺</option>
+            <option value="defense">Defense — 守護核心</option>
+            <option value="extraction">Extraction — 完成後撤離</option>
+            <option value="chaos">Chaos — 隨機規則</option>
+          </select>
+        </div>
+        <div>
+          <label for="difficulty">難度</label>
+          <select id="difficulty">
+            <option value="easy">Easy — 較慢反應</option>
+            <option value="normal" selected>Normal — 標準威脅</option>
+            <option value="hard">Hard — 更快、更準</option>
+          </select>
+        </div>
+        <div>
+          <label for="map">地圖</label>
+          <select id="map">
+            <option value="random">Random</option>
+            <option value="verdant">Verdant Ruins</option>
+            <option value="iron">Iron Depot</option>
+            <option value="prism">Prism Arena</option>
+          </select>
+        </div>
+        <div>
+          <label for="modifier-policy">World Modifier</label>
+          <select id="modifier-policy">
+            <option value="normal">Normal</option>
+            <option value="random" selected>Random</option>
+            <option value="custom">Custom Game selection</option>
+          </select>
+        </div>
+      </div>
+      <label for="seed">Run Seed</label>
+      <input id="seed" maxlength="32" autocomplete="off" />
+      <button id="start" class="primary">開始行動</button>
+      <button id="daily">Today's Challenge</button>
+      <p id="daily-summary" class="daily-summary"></p>
+      <details class="custom-panel">
+        <summary>Custom Game</summary>
+        <label class="check"><input id="custom-enabled" type="checkbox" /> 啟用自訂規則</label>
+        <div class="custom-grid">
+          <label>Enemy Count<input id="custom-enemy-count" type="number" min="1" max="100" value="12" /></label>
+          <label>Enemy Type<select id="custom-enemy-type"><option value="random">Random</option></select></label>
+          <label>Weather<select id="custom-weather"><option value="random">Random</option><option value="clear">Clear</option><option value="rain">Rain</option><option value="storm">Storm</option><option value="fog">Fog</option></select></label>
+          <label>Time<select id="custom-time"><option value="dawn">Dawn</option><option value="day" selected>Day</option><option value="sunset">Sunset</option><option value="night">Night</option></select></label>
+          <label>Starting Weapon<select id="custom-weapon"><option value="random">Random</option></select></label>
+          <label>World Modifier<select id="custom-modifier"><option value="none">None</option></select></label>
+          <label>Player HP<input id="custom-player-hp" type="number" min="25" max="500" value="100" /></label>
+          <label>Enemy HP ×<input id="custom-enemy-hp" type="number" min="0.5" max="5" step="0.25" value="1" /></label>
+        </div>
+        <label class="check"><input id="custom-boss" type="checkbox" /> 每波加入 Boss</label>
+        <label class="check"><input id="custom-infinite-ammo" type="checkbox" /> Infinite Ammo</label>
+      </details>
+      <div class="menu-links">
+        <button id="loadout">Loadout</button><button id="armory">Armory</button><button id="challenges">Challenges</button>
+        <button id="statistics">Statistics / Achievements</button><button id="menu-settings">Settings</button><button id="credits">Credits</button>
+      </div>
+      <p class="controls">WASD 移動 · Shift 衝刺 · Ctrl 蹲下 · Space 跳躍／翻越 · 滑鼠瞄準 · 左鍵射擊 · 右鍵 ADS · R 換彈 · F 檢視 · V 近戰 · 1–5 換槍 · ESC 暫停</p>
+      <p id="release-version" class="release-version"></p>
+    </main>
+
+    <section id="hud" class="hidden" aria-label="戰鬥資訊">
+      <div class="hud-top">
+        <div><small>WAVE</small><strong id="wave">1</strong></div>
+        <div><small>HOSTILES</small><strong id="enemies">0</strong></div>
+        <div><small>SCORE</small><strong id="score">0</strong></div>
+        <div><small>ZONE / WEATHER</small><strong id="run-info">—</strong></div>
+      </div>
+      <div id="message" role="status"></div>
+      <div id="combo" aria-live="polite"></div>
+      <div id="interaction" aria-live="polite"></div>
+      <div id="boss-hud" class="hidden"><span id="boss-name"></span><small id="boss-phase"></small><div class="bar"><span id="boss-health"></span></div></div>
+      <div id="damage-flash"></div>
+      <div id="damage-direction" aria-hidden="true">▲</div>
+      <div id="hit-marker" aria-hidden="true">×</div>
+      <div id="crosshair" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+      <div class="hud-bottom">
+        <div class="health-block">
+          <div><small>VITALS · ARMOR <span id="armor-label">0</span></small><strong id="health-label">100</strong></div>
+          <div class="bar"><span id="health-bar"></span></div>
+        </div>
+        <div class="weapon-block">
+          <small id="weapon-slot">01 / PISTOL</small>
+          <strong><span id="ammo">12</span><em>/</em><span id="reserve">72</span></strong>
+          <span id="reload-state"></span>
+        </div>
+      </div>
+    </section>
+
+    <section id="pause" class="panel modal hidden">
+      <p class="eyebrow">ACTION PAUSED</p>
+      <h2>戰鬥暫停</h2>
+      <button id="resume" class="primary">繼續</button>
+      <button id="restart">重新開始</button>
+      <button id="open-settings">Settings</button>
+      <button id="open-controls">Controls</button>
+      <button id="copy-seed">Copy Seed</button>
+      <button class="menu-button">返回主選單</button>
+    </section>
+
+    <section id="upgrade" class="panel modal hidden">
+      <p class="eyebrow">WAVE CLEARED</p>
+      <h2>選擇一項升級</h2>
+      <div class="upgrade-grid">
+        <button data-upgrade="damage"><strong>High Caliber</strong><span>所有武器傷害 +15%</span></button>
+        <button data-upgrade="health"><strong>Field Armor</strong><span>最大生命 +25，並補滿</span></button>
+        <button data-upgrade="reload"><strong>Fast Hands</strong><span>換彈時間 -15%</span></button>
+      </div>
+    </section>
+
+    <section id="game-over" class="panel modal hidden">
+      <p class="eyebrow">MISSION FAILED</p>
+      <h2>你倒下了</h2>
+      <p>抵達 Wave <strong id="final-wave">1</strong> · 分數 <strong id="final-score">0</strong></p>
+      <button id="retry" class="primary">再次挑戰</button>
+      <button class="menu-button">返回主選單</button>
+    </section>
+
+    <section id="victory" class="panel modal hidden">
+      <p class="eyebrow">MISSION COMPLETE</p>
+      <h2>目標完成</h2>
+      <p>完成 <strong id="victory-mode">Hunt</strong> · 分數 <strong id="victory-score">0</strong></p>
+      <button id="victory-retry" class="primary">再次挑戰</button>
+      <button class="menu-button">返回主選單</button>
+    </section>
+
+    <section id="statistics-panel" class="panel modal hidden">
+      <p class="eyebrow">CAREER RECORD</p>
+      <h2>統計與成就</h2>
+      <dl id="stats-list" class="stats-grid"></dl>
+      <p id="achievement-list" class="achievement-list"></p>
+      <button id="close-statistics" class="primary">返回</button>
+    </section>
+
+    <section id="loadout-panel" class="panel modal hidden">
+      <p class="eyebrow">FIELD KIT</p><h2>Loadout</h2>
+      <div id="loadout-slots" class="settings-grid"></div>
+      <button class="close-menu-panel primary">確認</button>
+    </section>
+
+    <section id="armory-panel" class="panel modal catalog hidden">
+      <p class="eyebrow">WEAPON DATABASE</p><h2>Armory</h2>
+      <div id="armory-list" class="catalog-grid"></div>
+      <button class="close-menu-panel primary">返回</button>
+    </section>
+
+    <section id="challenges-panel" class="panel modal hidden">
+      <p class="eyebrow">ACTIVE CONTRACTS</p><h2>Challenges</h2>
+      <p id="challenge-detail"></p><p>局內任務：Supply Drop、Elite Hunt、Hold Position、No Damage、Headshot、Weapon Challenge。</p>
+      <button class="close-menu-panel primary">返回</button>
+    </section>
+
+    <section id="credits-panel" class="panel modal hidden">
+      <p class="eyebrow">CREDITS</p><h2>Wildfront Arsenal</h2>
+      <p>Design, code, procedural 3D art and Web Audio synthesis built for the open web. No external runtime assets.</p>
+      <button class="close-menu-panel primary">返回</button>
+    </section>
+
+    <section id="settings-panel" class="panel modal hidden">
+      <p class="eyebrow">ACCESSIBILITY</p>
+      <h2>Settings</h2>
+      <div class="settings-grid">
+        <label>Graphics Profile<select id="setting-quality"><option value="auto">Auto</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="ultra">Ultra</option></select></label>
+        <label>Active Profile<output id="quality-value">AUTO</output></label>
+        <label>Resolution Scale <output id="resolution-value">100%</output><input id="setting-resolution" type="range" min="50" max="150" step="5" value="100" /></label>
+        <label>Particle Scale <output id="particle-value">100%</output><input id="setting-particles" type="range" min="0" max="100" step="10" value="100" /></label>
+        <label>FPS Limit<select id="setting-fps"><option value="0">Unlimited</option><option value="30">30</option><option value="60">60</option><option value="120">120</option></select></label>
+        <label>FOV <output id="fov-value">72</output><input id="setting-fov" type="range" min="55" max="100" value="72" /></label>
+        <label>Sensitivity <output id="sensitivity-value">1.0</output><input id="setting-sensitivity" type="range" min="0.2" max="2" step="0.1" value="1" /></label>
+        <label>ADS Sensitivity <output id="ads-sensitivity-value">0.75</output><input id="setting-ads-sensitivity" type="range" min="0.2" max="1" step="0.05" value="0.75" /></label>
+        <label>Hit Marker Size<input id="setting-hit-size" type="range" min="70" max="160" value="100" /></label>
+        <label>Crosshair Color<input id="setting-crosshair" type="color" value="#f5faed" /></label>
+        <label>Master Volume<input id="setting-master" type="range" min="0" max="100" value="80" /></label>
+        <label>Music Volume<input id="setting-music" type="range" min="0" max="100" value="55" /></label>
+        <label>SFX Volume<input id="setting-sfx" type="range" min="0" max="100" value="80" /></label>
+        <label>UI Volume<input id="setting-ui" type="range" min="0" max="100" value="70" /></label>
+      </div>
+      <label class="check"><input id="setting-shadows" type="checkbox" checked /> Shadows</label>
+      <label class="check"><input id="setting-post" type="checkbox" checked /> Post Processing</label>
+      <label class="check"><input id="setting-toggle-ads" type="checkbox" /> Toggle ADS</label>
+      <label class="check"><input id="setting-toggle-crouch" type="checkbox" /> Toggle Crouch</label>
+      <label class="check"><input id="setting-colorblind" type="checkbox" /> Colorblind Mode</label>
+      <label class="check"><input id="setting-reduce-flash" type="checkbox" /> Reduce Flash</label>
+      <label class="check"><input id="setting-reduce-shake" type="checkbox" /> Reduce Camera Shake</label>
+      <label class="check"><input id="setting-subtitles" type="checkbox" checked /> Subtitles</label>
+      <button id="close-settings" class="primary">返回</button>
+    </section>
+
+    <section id="controls-panel" class="panel modal hidden">
+      <p class="eyebrow">FIELD MANUAL</p>
+      <h2>Controls</h2>
+      <p class="control-list">WASD — 移動<br />Shift — 衝刺<br />Ctrl — 蹲下<br />Space — 跳躍／翻越<br />E — 互動<br />滑鼠 — 瞄準<br />左鍵 — 射擊<br />右鍵 — ADS<br />R — 換彈<br />F — 檢視武器<br />V — 近戰<br />1–5 — 換槍<br />ESC — 暫停</p>
+      <button id="close-controls" class="primary">返回</button>
+    </section>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
