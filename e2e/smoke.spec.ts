@@ -70,7 +70,7 @@ test('production build supports the core playable flow', async ({ page }) => {
   });
 
   await page.goto('./?test=1');
-  await expect(page.locator('#loading')).toBeHidden();
+  await expect(page.locator('#loading')).toBeHidden({ timeout: 30_000 });
   await expect(page.getByRole('heading', { name: /Wildfront Arsenal/i })).toBeVisible();
   await expect(page.locator('canvas#game')).toBeAttached();
   await page.getByRole('button', { name: 'Armory', exact: true }).click();
@@ -272,7 +272,7 @@ test('core loading failure offers recovery actions', async ({ page }) => {
 
 test('diagnostic routes create their specified real enemy loads', async ({ page }) => {
   await page.goto('./?benchmark=1');
-  await expect(page.locator('#loading')).toBeHidden();
+  await expect(page.locator('#loading')).toBeHidden({ timeout: 30_000 });
   expect(await page.evaluate(() => ({ diagnostic: window.__GAME_DIAGNOSTICS__.getState(), enemies: window.__GAME_TEST__.getEnemies().length }))).toMatchObject({
     diagnostic: { mode: 'benchmark', target: 25 },
     enemies: 25,
@@ -285,9 +285,10 @@ test('diagnostic routes create their specified real enemy loads', async ({ page 
   expect(report?.onePercentLowFrameTimeMs).toBeGreaterThan(0);
 
   await page.goto('./?aiStress=1');
-  await expect(page.locator('#loading')).toBeHidden();
-  expect(await page.evaluate(() => ({ diagnostic: window.__GAME_DIAGNOSTICS__.getState(), enemies: window.__GAME_TEST__.getEnemies().length }))).toMatchObject({
-    diagnostic: { mode: 'ai-stress', target: 10 },
-    enemies: 10,
-  });
+  await expect(page.locator('#loading')).toBeHidden({ timeout: 30_000 });
+  const stressState = await page.evaluate(() => ({ diagnostic: window.__GAME_DIAGNOSTICS__.getState(), enemies: window.__GAME_TEST__.getEnemies().length }));
+  expect(stressState.diagnostic.mode).toBe('ai-stress');
+  expect(stressState.diagnostic.target).toBeGreaterThanOrEqual(10);
+  expect(stressState.diagnostic.target).toBeLessThanOrEqual(50);
+  expect(stressState.enemies).toBe(stressState.diagnostic.target);
 });

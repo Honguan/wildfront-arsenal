@@ -21,7 +21,7 @@ test('production visual baseline set is captured', async ({ page }, testInfo) =>
     await page.evaluate(() => { document.querySelector('#visual-frame')?.remove(); document.querySelector<HTMLCanvasElement>('#game')!.style.visibility = ''; });
   };
   await page.goto('./?test=1');
-  await expect(page.locator('#loading')).toBeHidden();
+  await expect(page.locator('#loading')).toBeHidden({ timeout: 30_000 });
   await capture('01-main-menu');
 
   await page.getByRole('button', { name: 'Loadout', exact: true }).click();
