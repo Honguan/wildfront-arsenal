@@ -26,6 +26,7 @@ interface GameTestApi {
   getInteractions(): Array<{ key: string; label: string; used: boolean; position: number[] }>;
   getAnimals(): Array<{ type: string; state: string; position: number[] }>;
   getAttachments(): string[];
+  grantAttachment(id: string): boolean;
   getRenderState(): { background: string; toneMapping: number; exposure: number; pixelRatio: number; sun: number };
   readCenterPixel(): number[];
   getPlayer(): PlayerState;
@@ -50,7 +51,7 @@ interface DiagnosticApi {
   getState(): {
     complete: boolean;
     mode: string;
-    report: null | { averageFps: number; enemies: number; onePercentLowFrameTimeMs: number; particles: number; samples: number };
+    report: null | { averageFps: number; drawCalls: number; enemies: number; onePercentLowFrameTimeMs: number; particles: number; potentialStuckAgents: number; samples: number; triangles: number };
     target: number;
   };
 }
@@ -61,6 +62,23 @@ declare global {
     __GAME_DIAGNOSTICS__: DiagnosticApi;
   }
 }
+
+test('reload fills the effective extended magazine capacity', async ({ page }) => {
+  await page.goto('./?test=1');
+  await expect(page.locator('#loading')).toBeHidden({ timeout: 30_000 });
+  await page.locator('#modifier-policy').selectOption('normal');
+  await page.getByRole('button', { name: '開始行動' }).click();
+
+  expect(await page.evaluate(() => {
+    const api = window.__GAME_TEST__;
+    api.setWeapon(6);
+    const granted = api.grantAttachment('extended-mag');
+    api.fire();
+    api.reload();
+    return granted;
+  })).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__GAME_TEST__.getPlayer().ammo), { timeout: 3_000 }).toBe(41);
+});
 
 test('production build supports the core playable flow', async ({ page }) => {
   const runtimeErrors: string[] = [];
@@ -271,6 +289,7 @@ test('core loading failure offers recovery actions', async ({ page }) => {
 });
 
 test('diagnostic routes create their specified real enemy loads', async ({ page }) => {
+  test.setTimeout(60_000);
   await page.goto('./?benchmark=1');
   await expect(page.locator('#loading')).toBeHidden({ timeout: 30_000 });
   expect(await page.evaluate(() => ({ diagnostic: window.__GAME_DIAGNOSTICS__.getState(), enemies: window.__GAME_TEST__.getEnemies().length }))).toMatchObject({
@@ -281,8 +300,10 @@ test('diagnostic routes create their specified real enemy loads', async ({ page 
   const report = await page.evaluate(() => window.__GAME_DIAGNOSTICS__.getState().report);
   expect(report).toMatchObject({ enemies: 25, particles: 120 });
   expect(report?.averageFps).toBeGreaterThan(0);
+  expect(report?.drawCalls).toBeLessThanOrEqual(110);
   expect(report?.samples).toBeGreaterThan(0);
   expect(report?.onePercentLowFrameTimeMs).toBeGreaterThan(0);
+  expect(report?.triangles).toBeLessThanOrEqual(5_200);
 
   await page.goto('./?aiStress=1');
   await expect(page.locator('#loading')).toBeHidden({ timeout: 30_000 });
@@ -291,4 +312,9 @@ test('diagnostic routes create their specified real enemy loads', async ({ page 
   expect(stressState.diagnostic.target).toBeGreaterThanOrEqual(10);
   expect(stressState.diagnostic.target).toBeLessThanOrEqual(50);
   expect(stressState.enemies).toBe(stressState.diagnostic.target);
+  await expect.poll(() => page.evaluate(() => window.__GAME_DIAGNOSTICS__.getState().complete), { timeout: 30_000 }).toBe(true);
+  const stressReport = await page.evaluate(() => window.__GAME_DIAGNOSTICS__.getState().report);
+  expect(stressReport?.drawCalls).toBeLessThanOrEqual(200);
+  expect(stressReport?.potentialStuckAgents).toBe(0);
+  expect(stressReport?.triangles).toBeLessThanOrEqual(9_000);
 });

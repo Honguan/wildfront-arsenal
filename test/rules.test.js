@@ -17,6 +17,7 @@ import { environmentMix, musicMix } from '../src/audio.js';
 import { FACTIONS, createVisualIdentity, factionFor } from '../src/enemies/Visuals.ts';
 import { createProgress, recordRun, summarizeProgress } from '../src/progress.js';
 import { createShotEffects } from '../src/effects/ShotEffects.ts';
+import { GRAPHICS_PROFILES } from '../src/platform.ts';
 
 test('content, seed, and progression rules stay intact', () => {
   assert.equal(WEAPONS.length, 20);
@@ -128,6 +129,8 @@ test('performance reports calculate stable benchmark and stress metrics', () => 
   assert.equal(report.onePercentLowFrameTimeMs, 40);
   assert.equal(report.frameSpikes, 1);
   assert.equal(report.enemies, 25);
+  assert.ok(GRAPHICS_PROFILES.low.enemyLodDistance < GRAPHICS_PROFILES.medium.enemyLodDistance);
+  assert.ok(GRAPHICS_PROFILES.medium.enemyLodDistance < GRAPHICS_PROFILES.high.enemyLodDistance);
 });
 
 test('fixed game loop caps catch-up work and preserves its remainder', () => {

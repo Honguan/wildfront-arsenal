@@ -53,9 +53,10 @@ window.addEventListener('error', showCoreLoadError, { once: true });
 window.addEventListener('unhandledrejection', showCoreLoadError, { once: true });
 if (query.has('failCore')) throw new Error('Simulated required game data failure');
 const diagnosticMode = query.has('benchmark') ? 'benchmark' : query.has('aiStress') ? 'ai-stress' : null;
-const testMode = query.get('test') === '1' || diagnosticMode !== null;
+const captureMode = query.get('test') === '1';
+const testMode = captureMode || diagnosticMode !== null;
 const canvas = $('#game');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: testMode });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: captureMode });
 const capabilities = detectGraphicsProfile(renderer);
 const pixelRatio = { low: 0.75, medium: 1.25, high: 1.75 }[capabilities.profile];
 renderer.setPixelRatio(Math.min(devicePixelRatio, pixelRatio));
@@ -80,6 +81,20 @@ const advanceSimulation = createFixedStep();
 const raycaster = new THREE.Raycaster();
 const sightOrigin = new THREE.Vector3();
 const sightDirection = new THREE.Vector3();
+const animalDirection = new THREE.Vector3();
+const enemyTarget = new THREE.Vector3();
+const enemyDirection = new THREE.Vector3();
+const enemyPrediction = new THREE.Vector3();
+const enemySide = new THREE.Vector3();
+const enemyMovement = new THREE.Vector3();
+const enemyCoverDirection = new THREE.Vector3();
+const collisionSteering = [
+  [Math.SQRT1_2, Math.SQRT1_2], [Math.SQRT1_2, -Math.SQRT1_2],
+  [0, 1], [0, -1],
+  [-Math.SQRT1_2, Math.SQRT1_2], [-Math.SQRT1_2, -Math.SQRT1_2],
+  [-1, 0],
+];
+let enemyLodDistance = GRAPHICS_PROFILES[capabilities.profile].enemyLodDistance;
 const playerNoise = { position: new THREE.Vector3(), radius: 0, timer: 0, type: 'ambient' };
 const keys = new Set();
 const enemies = [];
@@ -244,7 +259,10 @@ function addCover(mesh) {
   mesh.userData.collisionBox = new THREE.Box3().setFromObject(mesh);
   mesh.userData.surface ??= 'concrete';
   coverTargets.push(mesh);
-  if (!mesh.userData.barrel) coverPoints.push(...coverPointsForBox(mesh.userData.collisionBox, coverPoints.length));
+  if (!mesh.userData.barrel) {
+    mesh.userData.coverPoints = coverPointsForBox(mesh.userData.collisionBox, coverPoints.length);
+    coverPoints.push(...mesh.userData.coverPoints);
+  }
   return mesh;
 }
 
@@ -277,6 +295,13 @@ function removeCover(mesh) {
   world.remove(mesh);
   const index = coverTargets.indexOf(mesh);
   if (index >= 0) coverTargets.splice(index, 1);
+  const removedPoints = new Set(mesh.userData.coverPoints ?? []);
+  for (let pointIndex = coverPoints.length - 1; pointIndex >= 0; pointIndex -= 1) {
+    if (removedPoints.has(coverPoints[pointIndex])) coverPoints.splice(pointIndex, 1);
+  }
+  mesh.geometry?.dispose();
+  if (Array.isArray(mesh.material)) mesh.material.forEach((material) => material.dispose());
+  else mesh.material?.dispose();
 }
 
 function addWorldInteractions(map) {
@@ -683,10 +708,25 @@ function openNearbyLoot(selectedBox = null) {
 }
 
 function nearestAction() {
-  return [
-    ...state.lootBoxes.filter(({ opened }) => !opened).map((item) => ({ kind: 'loot', item, distance: item.mesh.position.distanceTo(camera.position) })),
-    ...state.interactables.filter(({ used }) => !used).map((item) => ({ kind: 'interaction', item, distance: item.mesh.position.distanceTo(camera.position) }))
-  ].filter(({ kind, distance }) => distance <= (kind === 'loot' ? 2.4 + state.pickupLevel * 1.5 : 2.8)).sort((a, b) => a.distance - b.distance)[0];
+  let nearest;
+  let nearestDistance = Infinity;
+  for (const item of state.lootBoxes) {
+    if (item.opened) continue;
+    const distance = item.mesh.position.distanceTo(camera.position);
+    if (distance <= 2.4 + state.pickupLevel * 1.5 && distance < nearestDistance) {
+      nearest = { kind: 'loot', item, distance };
+      nearestDistance = distance;
+    }
+  }
+  for (const item of state.interactables) {
+    if (item.used) continue;
+    const distance = item.mesh.position.distanceTo(camera.position);
+    if (distance <= 2.8 && distance < nearestDistance) {
+      nearest = { kind: 'interaction', item, distance };
+      nearestDistance = distance;
+    }
+  }
+  return nearest;
 }
 
 function interactNearby() {
@@ -948,12 +988,17 @@ function spawnEnemy(type, index, { boss = false, bossType = 'juggernaut', forceE
 
   const angle = (index / Math.max(1, createWave(state.wave, state.difficulty).length)) * Math.PI * 2 + state.rng() * .45;
   const radius = 20 + state.rng() * 10;
-  group.position.set(Math.cos(angle) * radius, config.flying ? 3 : 0, Math.sin(angle) * radius);
+  for (let attempt = 0; attempt < 16; attempt += 1) {
+    const candidateAngle = angle + attempt * 2.399963;
+    const candidateRadius = 20 + (radius - 20 + attempt * 2.3) % 10;
+    group.position.set(Math.cos(candidateAngle) * candidateRadius, config.flying ? 3 : 0, Math.sin(candidateAngle) * candidateRadius);
+    if (config.flying || !positionBlocked(group.position.x, group.position.z, boss ? .7 : .42)) break;
+  }
   scene.add(group);
 
   const personalities = ['aggressive', 'defensive', 'cautious', 'flanker', 'coward'];
   const armored = boss || traits.includes('armored') || type === 'heavy';
-  const enemy = { id: ++state.nextEnemyId, type, config, group, traits, boss, bossType: bossConfig?.id, bossSignature, health: config.health, maxHealth: config.health, armor: { head: armored ? 70 : 0, chest: armored ? 140 : 0 }, baseSpeed: config.speed, baseDamage: config.damage, phase: 1, armorBroken: false, weakPoint, visual, detailMeshes: [body, head, ...arms, ...legs, ...(shield ? [shield] : []), ...(weakPoint ? [weakPoint] : [])], accessories, lowMesh, arms, legs, animationTime: state.rng() * Math.PI * 2, fireTimer: 0, telegraphTimer: 0, pendingAttack: null, coverPoint: null, coverDecisionTimer: 0, combatState: 'acquire', personality: personalities[Math.floor(state.rng() * personalities.length)], lastKnownPlayerPosition: camera.position.clone(), memoryTimer: .5, perceptionTimer: state.rng() * .2, seesPlayer: false, patrolTarget: group.position.clone(), emissive: boss ? 0x8f210d : traits.length ? 0x574b09 : 0, attackTimer: .5 + state.rng(), abilityTimer: 5 + state.rng() * 3, hitTimer: 0, strafe: state.rng() > .5 ? 1 : -1 };
+  const enemy = { id: ++state.nextEnemyId, type, config, group, traits, boss, bossType: bossConfig?.id, bossSignature, health: config.health, maxHealth: config.health, armor: { head: armored ? 70 : 0, chest: armored ? 140 : 0 }, baseSpeed: config.speed, baseDamage: config.damage, phase: 1, armorBroken: false, weakPoint, visual, detailMeshes: [body, head, ...arms, ...legs, ...(shield ? [shield] : []), ...(weakPoint ? [weakPoint] : [])], accessories, lowMesh, arms, legs, animationTime: state.rng() * Math.PI * 2, fireTimer: 0, telegraphTimer: 0, pendingAttack: null, coverPoint: null, coverDecisionTimer: 0, combatState: 'acquire', personality: personalities[Math.floor(state.rng() * personalities.length)], lastKnownPlayerPosition: camera.position.clone(), memoryTimer: .5, perceptionTimer: state.rng() * .2, seesPlayer: false, patrolTarget: group.position.clone(), avoidanceDirection: new THREE.Vector3(), avoidanceTimer: 0, emissive: boss ? 0x8f210d : traits.length ? 0x574b09 : 0, attackTimer: .5 + state.rng(), abilityTimer: 5 + state.rng() * 3, hitTimer: 0, strafe: state.rng() > .5 ? 1 : -1 };
   enemy.squadId = Math.floor(index / 5);
   enemy.squadRole = config.commander ? 'Commander' : config.medic ? 'Medic' : type === 'heavy' ? 'Heavy' : 'Rifleman';
   enemy.squadCommand = null;
@@ -1084,6 +1129,9 @@ function startGame() {
     runStarted: performance.now(),
     runRecorded: false,
     runStats: freshRunStats(),
+    performanceLevel: 0,
+    performanceTime: 0,
+    performanceFrames: 0,
     nextEnemyId: 0,
     reloading: false,
     reloadDuration: 0,
@@ -1123,6 +1171,7 @@ function startGame() {
     healthCueTimer: 0
   });
   buildMap(run);
+  applyGraphicsSettings();
   if (state.mode === 'defense') {
     state.objective = new THREE.Mesh(
       new THREE.CylinderGeometry(1.2, 1.5, 2.8, 10),
@@ -1175,19 +1224,19 @@ function reload() {
 }
 
 function finishReload() {
-  const config = WEAPONS[state.loadout[state.weaponIndex]];
+  const weapon = currentWeapon();
   const ammoState = state.weapons[state.weaponIndex];
-  if (config.shellReload) {
+  if (weapon.shellReload) {
     ammoState.ammo += 1;
     ammoState.reserve -= 1;
-    if (ammoState.ammo < config.magazine && ammoState.reserve > 0) {
-      state.reloadTimer = Math.max(.22, config.reload * (1 - state.reloadLevel * .15));
+    if (ammoState.ammo < weapon.magazine && ammoState.reserve > 0) {
+      state.reloadTimer = Math.max(.22, weapon.reload * (1 - state.reloadLevel * .15));
       state.reloadDuration = state.reloadTimer;
     } else {
       state.reloading = false;
     }
   } else {
-    const amount = Math.min(config.magazine - ammoState.ammo, ammoState.reserve);
+    const amount = Math.min(weapon.magazine - ammoState.ammo, ammoState.reserve);
     ammoState.ammo += amount;
     ammoState.reserve -= amount;
     state.reloading = false;
@@ -1539,7 +1588,7 @@ function alertSquad(source) {
 
 function updateAnimals(delta) {
   for (const animal of animals) {
-    const fromPlayer = new THREE.Vector3().subVectors(animal.group.position, camera.position);
+    const fromPlayer = animalDirection.subVectors(animal.group.position, camera.position);
     fromPlayer.y = 0;
     const distance = fromPlayer.length();
     if ((animal.type === 'deer' || animal.type === 'rabbit' || animal.type === 'wolf') && distance < 10) animal.state = 'flee';
@@ -1566,7 +1615,6 @@ function updateAnimals(delta) {
 
 function updateEnemies(delta) {
   const difficulty = DIFFICULTIES[state.difficulty];
-  const toPlayer = new THREE.Vector3();
   for (const enemy of [...enemies]) {
     enemy.perceptionTimer -= delta;
     enemy.memoryTimer = Math.max(0, enemy.memoryTimer - delta);
@@ -1592,19 +1640,19 @@ function updateEnemies(delta) {
       }
       enemy.perceptionTimer = state.difficulty === 'hard' ? .12 : .25;
     }
-    const target = (state.mode === 'defense' && state.objective ? state.objective.position : enemy.memoryTimer > 0 ? enemy.lastKnownPlayerPosition : enemy.patrolTarget).clone();
+    const target = enemyTarget.copy(state.mode === 'defense' && state.objective ? state.objective.position : enemy.memoryTimer > 0 ? enemy.lastKnownPlayerPosition : enemy.patrolTarget);
     if (state.difficulty === 'hard' && enemy.seesPlayer) {
-      const prediction = camera.getWorldDirection(new THREE.Vector3());
+      const prediction = camera.getWorldDirection(enemyPrediction);
       prediction.y = 0;
-      const side = new THREE.Vector3(-prediction.z, 0, prediction.x);
+      const side = enemySide.set(-prediction.z, 0, prediction.x);
       target.addScaledVector(prediction, (Number(keys.has('KeyW')) - Number(keys.has('KeyS'))) * 1.5);
       target.addScaledVector(side, (Number(keys.has('KeyD')) - Number(keys.has('KeyA'))) * 1.5);
     }
+    enemyDirection.subVectors(target, enemy.group.position);
+    enemyDirection.y = 0;
+    const distance = enemyDirection.length();
+    const direction = enemyDirection.normalize();
     if (enemy.memoryTimer === 0) enemy.combatState = 'patrol';
-    toPlayer.subVectors(target, enemy.group.position);
-    toPlayer.y = 0;
-    const distance = toPlayer.length();
-    const direction = toPlayer.normalize();
     const config = enemy.config;
     enemy.coverDecisionTimer -= delta;
     enemy.squadCommandTimer = Math.max(0, enemy.squadCommandTimer - delta);
@@ -1642,11 +1690,11 @@ function updateEnemies(delta) {
     const chaosSpeed = state.chaosModifier === 'fast-enemies' ? 2 : 1;
     const squadSpeed = commanded ? 1.15 : 1;
     let moveDirection = direction;
-    if (enemy.personality === 'flanker' && state.difficulty !== 'easy') moveDirection = new THREE.Vector3(-direction.z * enemy.strafe, 0, direction.x * enemy.strafe);
-    if (enemy.squadCommand === 'flank-left') moveDirection = new THREE.Vector3(-direction.z, 0, direction.x);
-    if (enemy.squadCommand === 'flank-right') moveDirection = new THREE.Vector3(direction.z, 0, -direction.x);
+    if (enemy.personality === 'flanker' && state.difficulty !== 'easy') moveDirection = enemyMovement.set(-direction.z * enemy.strafe, 0, direction.x * enemy.strafe);
+    if (enemy.squadCommand === 'flank-left') moveDirection = enemyMovement.set(-direction.z, 0, direction.x);
+    if (enemy.squadCommand === 'flank-right') moveDirection = enemyMovement.set(direction.z, 0, -direction.x);
     if (enemy.coverPoint) {
-      const coverDirection = new THREE.Vector3(enemy.coverPoint.x - enemy.group.position.x, 0, enemy.coverPoint.z - enemy.group.position.z);
+      const coverDirection = enemyCoverDirection.set(enemy.coverPoint.x - enemy.group.position.x, 0, enemy.coverPoint.z - enemy.group.position.z);
       const coverDistance = coverDirection.length();
       if (coverDistance > .45) {
         moveDirection = coverDirection.normalize();
@@ -1657,24 +1705,39 @@ function updateEnemies(delta) {
         enemy.combatState = 'engage';
       }
     }
+    enemy.avoidanceTimer = Math.max(0, enemy.avoidanceTimer - delta);
+    if (enemy.avoidanceTimer > 0) {
+      moveDirection = enemy.avoidanceDirection;
+      movement = Math.max(.8, Math.abs(movement));
+    }
     const startX = enemy.group.position.x;
     const startZ = enemy.group.position.z;
-    enemy.group.position.addScaledVector(moveDirection, movement * config.speed * difficulty.speed * chaosSpeed * squadSpeed * delta);
+    const movementStep = movement * config.speed * difficulty.speed * chaosSpeed * squadSpeed * delta;
+    enemy.group.position.addScaledVector(moveDirection, movementStep);
     if (config.behavior !== 'rush' && distance < config.range * 1.1) {
       const strafeSpeed = config.behavior === 'flank' ? 2.2 : .75;
       enemy.group.position.x += -direction.z * enemy.strafe * delta * strafeSpeed;
       enemy.group.position.z += direction.x * enemy.strafe * delta * strafeSpeed;
     }
     if (!config.flying && positionBlocked(enemy.group.position.x, enemy.group.position.z, enemy.boss ? .7 : .42)) {
-      if (!positionBlocked(enemy.group.position.x, startZ, enemy.boss ? .7 : .42)) enemy.group.position.z = startZ;
-      else if (!positionBlocked(startX, enemy.group.position.z, enemy.boss ? .7 : .42)) enemy.group.position.x = startX;
-      else enemy.group.position.set(startX, enemy.group.position.y, startZ);
+      const attemptedX = enemy.group.position.x - startX;
+      const attemptedZ = enemy.group.position.z - startZ;
+      enemy.group.position.set(startX, enemy.group.position.y, startZ);
+      for (const [cosine, sine] of collisionSteering) {
+        const candidateX = startX + attemptedX * cosine - attemptedZ * sine;
+        const candidateZ = startZ + attemptedX * sine + attemptedZ * cosine;
+        if (positionBlocked(candidateX, candidateZ, enemy.boss ? .7 : .42)) continue;
+        enemy.group.position.set(candidateX, enemy.group.position.y, candidateZ);
+        enemy.avoidanceDirection.set(candidateX - startX, 0, candidateZ - startZ).normalize();
+        enemy.avoidanceTimer = .75;
+        break;
+      }
     }
     const desiredYaw = Math.atan2(target.x - enemy.group.position.x, target.z - enemy.group.position.z);
     const yawDelta = Math.atan2(Math.sin(desiredYaw - enemy.group.rotation.y), Math.cos(desiredYaw - enemy.group.rotation.y));
     enemy.group.rotation.y += THREE.MathUtils.clamp(yawDelta, -delta * 4, delta * 4);
     const lodDistance = enemy.group.position.distanceTo(camera.position);
-    const lowDetail = lodDistance > 30;
+    const lowDetail = lodDistance > enemyLodDistance;
     enemy.detailMeshes.forEach((mesh) => { mesh.visible = !lowDetail; });
     enemy.accessories.forEach((mesh) => { mesh.visible = !lowDetail && lodDistance < 18; });
     enemy.lowMesh.visible = lowDetail;
@@ -2075,6 +2138,7 @@ const diagnostic = diagnosticMode ? {
   frameTimes: [],
   mode: diagnosticMode,
   potentialStuckAgents: 0,
+  movement: new Map(),
   positions: new Map(),
   report: null,
   startMemoryMb: performance.memory ? performance.memory.usedJSHeapSize / 1048576 : null,
@@ -2097,19 +2161,37 @@ function addStressEnemies(target) {
   while (enemies.length < target) spawnEnemy('grunt', enemies.length, { suppressElite: true });
   diagnostic.target = target;
   diagnostic.positions = new Map(enemies.map((enemy) => [enemy.id, enemy.group.position.clone()]));
+  diagnostic.movement = new Map(enemies.map((enemy) => [enemy.id, 0]));
   updateHud();
+}
+
+function sampleAgentMovement() {
+  for (const enemy of enemies) {
+    const previous = diagnostic.positions.get(enemy.id);
+    if (!previous) {
+      diagnostic.positions.set(enemy.id, enemy.group.position.clone());
+      diagnostic.movement.set(enemy.id, 0);
+      continue;
+    }
+    diagnostic.movement.set(enemy.id, (diagnostic.movement.get(enemy.id) ?? 0) + previous.distanceTo(enemy.group.position));
+    previous.copy(enemy.group.position);
+  }
 }
 
 function checkPotentialStuckAgents() {
   for (const enemy of enemies) {
-    const previous = diagnostic.positions.get(enemy.id);
-    if (!previous) continue;
     const distanceToPlayer = enemy.group.position.distanceTo(camera.position);
-    if (distanceToPlayer > enemy.config.range * 1.1 && previous.distanceTo(enemy.group.position) < .25) diagnostic.potentialStuckAgents += 1;
+    const moved = diagnostic.movement.get(enemy.id) ?? 0;
+    if (distanceToPlayer > enemy.config.range * 1.1 && moved < .25) {
+      diagnostic.potentialStuckAgents += 1;
+    }
   }
 }
 
 function startDiagnostic() {
+  $('#seed').value = `DIAGNOSTIC-${diagnostic.mode.toUpperCase()}`;
+  $('#map').value = 'verdant';
+  $('#modifier-policy').value = 'normal';
   startGame();
   clearEnemies();
   state.health = 100000;
@@ -2138,6 +2220,7 @@ function updateDiagnostic(frameDelta) {
   diagnostic.elapsed += frameDelta;
   diagnostic.frameTimes.push(frameDelta * 1000);
   if (diagnostic.mode === 'ai-stress') {
+    sampleAgentMovement();
     const target = stressTarget(diagnostic.elapsed);
     if (target !== diagnostic.target) {
       checkPotentialStuckAgents();
@@ -2200,7 +2283,7 @@ function animate(time) {
   timer.update();
   const frameDelta = timer.getDelta();
   const delta = Math.min(frameDelta, .05);
-  monitorPerformance(delta);
+  monitorPerformance(frameDelta);
   updateDiagnostic(frameDelta);
   updateDebug(delta);
   advanceSimulation(frameDelta, simulate);
@@ -2233,6 +2316,7 @@ function applyGraphicsSettings() {
   }
   const activeProfile = state.settings.quality === 'auto' ? capabilities.profile : state.settings.quality;
   const profile = GRAPHICS_PROFILES[activeProfile];
+  enemyLodDistance = Math.max(12, profile.enemyLodDistance - state.performanceLevel * 4);
   renderer.setPixelRatio(Math.min(devicePixelRatio * profile.resolutionScale * state.settings.resolutionScale / 100, 2));
   renderer.setSize(innerWidth, innerHeight);
   renderer.shadowMap.enabled = profile.shadows && state.settings.shadows && state.performanceLevel < 2;
@@ -2580,6 +2664,11 @@ if (testMode) {
     emitNoise(type = 'gunshot', radius = 20) { emitPlayerNoise(Number(radius) || 0, String(type)); },
     interact: interactNearby,
     getAttachments: () => [...state.attachments],
+    grantAttachment(id) {
+      if (!ATTACHMENTS.some((attachment) => attachment.id === id) || state.attachments.includes(id)) return false;
+      state.attachments.push(id);
+      return true;
+    },
     applyPerk,
     getRenderState: () => ({ background: scene.background.getHexString(), toneMapping: renderer.toneMapping, exposure: renderer.toneMappingExposure, pixelRatio: renderer.getPixelRatio(), sun: sun.intensity }),
     readCenterPixel() {

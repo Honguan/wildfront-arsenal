@@ -31,6 +31,8 @@ export function createShotEffects(tracerCapacity = 24, impactCapacity = 32, casi
     group.add(object);
     return { object, life: 0 };
   });
+  const fadingEffects = [...tracers, ...impacts];
+  const allEffects = [...fadingEffects, ...casings, ...explosions];
   let tracerIndex = 0;
   let impactIndex = 0;
   let casingIndex = 0;
@@ -76,7 +78,7 @@ export function createShotEffects(tracerCapacity = 24, impactCapacity = 32, casi
       effect.life = .24;
     },
     update(delta: number) {
-      for (const effect of [...tracers, ...impacts]) {
+      for (const effect of fadingEffects) {
         if (!effect.object.visible) continue;
         effect.life -= delta;
         effect.object.material.opacity = Math.max(0, effect.life * 8);
@@ -99,10 +101,12 @@ export function createShotEffects(tracerCapacity = 24, impactCapacity = 32, casi
       }
     },
     clear() {
-      for (const effect of [...tracers, ...impacts, ...casings, ...explosions]) effect.object.visible = false;
+      for (const effect of allEffects) effect.object.visible = false;
     },
     activeCount() {
-      return [...tracers, ...impacts, ...casings, ...explosions].filter(({ object }) => object.visible).length;
+      let count = 0;
+      for (const { object } of allEffects) if (object.visible) count += 1;
+      return count;
     },
   };
 }
