@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
-import { ATTACHMENTS, BOSSES, CHAOS_MODIFIERS, DIFFICULTIES, ENEMY_TYPES, MAPS, MODES, WEATHER, WEAPONS, WEAPON_QUALITIES, circleIntersectsRectangle, createDailyChallenge, createRng, createRun, createWave, pickPerks, rollElite, shotDamage } from './rules.js';
+import { ATTACHMENTS, BOSSES, CHAOS_MODIFIERS, DIFFICULTIES, ENEMY_TYPES, MAPS, MODES, ROTATING_CHAOS_MODIFIERS, WEATHER, WEAPONS, WEAPON_QUALITIES, arenaShiftPosition, circleIntersectsRectangle, createDailyChallenge, createRng, createRun, createWave, pickPerks, rollElite, shotDamage } from './rules.js';
 import { ACHIEVEMENTS, recordRun, summarizeProgress } from './progress.js';
 import { initAudio, playDanger, playEmpty, playEquip, playHeadshot, playHealthCue, playImpact, playReload, playShot, playWeather, setAudioSettings, setEnvironmentAudio, setMusicIntensity } from './audio.js';
 import { loadSave, saveGame } from './core/SaveManager.ts';
@@ -169,6 +169,7 @@ const state = {
   reloading: false,
   reloadTimer: 0,
   reloadDuration: 0,
+  boltTimer: 0,
   equipTimer: 0,
   inspectTimer: 0,
   meleeTimer: 0,
@@ -358,6 +359,12 @@ function addWorldInteractions(map) {
     world.add(portal);
     return portal;
   });
+  const arenaWalls = map.id === 'prism' ? Array.from({ length: 4 }, (_, index) => {
+    const position = arenaShiftPosition(index, false);
+    const wall = addBox(position.x, 1.5, position.z, 5, 3, .7, index % 2 ? 0x3e8da0 : 0x6750a5, position.rotation);
+    wall.userData.shiftIndex = index;
+    return wall;
+  }) : [];
 
   const switchKey = `${map.id}:switch`;
   const turretKey = `${map.id}:turret`;
@@ -376,7 +383,10 @@ function addWorldInteractions(map) {
     trapTimer: 0,
     turret,
     turretActive: state.usedWorld.has(turretKey),
-    turretTimer: 0
+    turretTimer: 0,
+    arenaWalls,
+    arenaShifted: false,
+    arenaShiftTimer: 90
   };
   if (state.usedWorld.has(switchKey)) bridge.position.y = .2;
   state.worldFeatures = features;
@@ -639,6 +649,14 @@ scene.add(playerShadowRig);
 const muzzle = new THREE.PointLight(0xffb347, 0, 3);
 muzzle.position.set(0, 0, -1);
 camera.add(muzzle);
+const flashlight = new THREE.SpotLight(0xe8f4ff, 0, 34, Math.PI / 7, .45, 1.2);
+flashlight.position.set(.18, -.08, -.35);
+flashlight.target.position.set(0, 0, -10);
+camera.add(flashlight, flashlight.target);
+
+function syncFlashlight() {
+  flashlight.intensity = state.attachments.includes('flashlight') ? (state.run.time === 'night' ? 14 : 7) : 0;
+}
 
 function currentWeapon() {
   const weapon = { ...WEAPONS[state.loadout[state.weaponIndex]], ...state.weapons[state.weaponIndex] };
@@ -679,7 +697,8 @@ function openNearbyLoot(selectedBox = null) {
     return true;
   }
   if (box.quality === 'Military') {
-    const weaponIndex = Math.floor(state.rng() * WEAPONS.length);
+    const weaponPool = state.chaosModifier === 'shotgun-only' ? WEAPONS.map((weapon, index) => [weapon, index]).filter(([weapon]) => weapon.category === 'SHOTGUN').map(([, index]) => index) : WEAPONS.map((_, index) => index);
+    const weaponIndex = weaponPool[Math.floor(state.rng() * weaponPool.length)];
     state.loadout[state.weaponIndex] = weaponIndex;
     state.weapons[state.weaponIndex] = { ammo: WEAPONS[weaponIndex].magazine, reserve: WEAPONS[weaponIndex].reserve, heat: 0 };
     state.weaponQualities[state.weaponIndex] = 0;
@@ -697,6 +716,7 @@ function openNearbyLoot(selectedBox = null) {
   if (available.length) {
     const attachment = available[Math.floor(state.rng() * available.length)];
     state.attachments.push(attachment.id);
+    syncFlashlight();
     announce(`${box.quality} CACHE · ${attachment.name}`, 2);
   } else {
     state.weapons[state.weaponIndex].reserve += currentWeapon().magazine * 2;
@@ -816,7 +836,7 @@ function updateHud() {
   hud.weapon.textContent = `0${state.weaponIndex + 1} / ${weapon.category} · ${weapon.name} · ${weapon.quality.toUpperCase()}${state.attachments.length ? ` · +${state.attachments.length}` : ''}`;
   hud.ammo.textContent = weapon.overheat ? Math.round(weapon.heat) : weapon.ammo;
   hud.reserve.textContent = weapon.overheat ? '% HEAT' : weapon.reserve;
-  hud.reload.textContent = weapon.overheat && weapon.heat >= 100 ? 'COOLING' : state.reloading ? (weapon.shellReload ? 'LOADING SHELLS' : 'RELOADING') : '';
+  hud.reload.textContent = state.boltTimer > 0 ? 'CYCLING BOLT' : weapon.overheat && weapon.heat >= 100 ? 'COOLING' : state.reloading ? (weapon.shellReload ? 'LOADING SHELLS' : weapon.revolverReload ? 'SWAPPING CYLINDER' : 'RELOADING') : '';
   hud.combo.textContent = state.comboKills >= 2 ? `${state.comboKills}× COMBO` : '';
   const boss = enemies.find(({ boss }) => boss);
   hud.boss.classList.toggle('hidden', !boss);
@@ -1135,6 +1155,7 @@ function startGame() {
     nextEnemyId: 0,
     reloading: false,
     reloadDuration: 0,
+    boltTimer: 0,
     equipTimer: 0,
     inspectTimer: 0,
     meleeTimer: 0,
@@ -1171,6 +1192,7 @@ function startGame() {
     healthCueTimer: 0
   });
   buildMap(run);
+  syncFlashlight();
   applyGraphicsSettings();
   if (state.mode === 'defense') {
     state.objective = new THREE.Mesh(
@@ -1199,8 +1221,10 @@ function startGame() {
 
 function switchWeapon(index) {
   if (state.loadout[index] === undefined) return;
+  if (state.chaosModifier === 'shotgun-only' && WEAPONS[state.loadout[index]].category !== 'SHOTGUN') return;
   state.weaponIndex = index;
   state.reloading = false;
+  state.boltTimer = 0;
   state.recoilShot = 0;
   state.equipTimer = .28;
   const weapon = currentWeapon();
@@ -1252,6 +1276,8 @@ function flashHit(headshot = false) {
 }
 
 function damageEnemy(enemy, damage, headshot, environment = false, context = {}) {
+  const activeEnemyIndex = enemies.indexOf(enemy);
+  if (activeEnemyIndex < 0) return;
   enemy.health -= damage;
   enemy.hitTimer = .08;
   enemy.group.children[0].material.emissive.setHex(0xffffff);
@@ -1299,7 +1325,7 @@ function damageEnemy(enemy, damage, headshot, environment = false, context = {})
   state.score += scored.total;
   if (state.lifesteal) state.health = Math.min(state.maxHealth, state.health + state.lifesteal * 4);
   if (enemy.traits.includes('explosive') && enemy.group.position.distanceTo(camera.position) < 5) damagePlayer(20, enemy.group.position);
-  enemies.splice(enemies.indexOf(enemy), 1);
+  enemies.splice(activeEnemyIndex, 1);
   enemyTargets = enemyTargets.filter((target) => target.userData.enemy !== enemy);
   if (state.explosiveLevel || state.chaosModifier === 'explosive-world') {
     for (const nearby of [...enemies]) {
@@ -1347,6 +1373,7 @@ function fire(force = false) {
   if (state.phase !== 'playing' || !force && !controls.isLocked) return;
   const weapon = currentWeapon();
   const now = performance.now() / 1000;
+  if (state.boltTimer > 0) return;
   if (now - state.lastShot < 60 / weapon.rate) return;
   if (weapon.overheat && weapon.heat >= 100) {
     announce('WEAPON OVERHEATED', .7);
@@ -1370,6 +1397,7 @@ function fire(force = false) {
   recoil.yaw *= recoilMultiplier;
   recoil.weaponKick *= recoilMultiplier;
   state.lastShot = now;
+  state.boltTimer = weapon.boltCycle ?? 0;
   state.idleTimer = 8;
   emitPlayerNoise(28 * (weapon.noise ?? 1), 'gunshot');
   playShot(weapon.name, state.run.map === 'iron' ? 'indoor' : 'outdoor');
@@ -1961,13 +1989,14 @@ function updatePlayer(delta) {
   const landingKick = state.landingTimer ? Math.sin(state.landingTimer / .18 * Math.PI) * .055 : 0;
   const targetX = state.ads ? .015 : .34;
   const reloadMotion = state.reloading ? Math.sin((1 - state.reloadTimer / Math.max(.01, state.reloadDuration)) * Math.PI) : 0;
+  const boltMotion = state.boltTimer > 0 ? Math.sin((1 - state.boltTimer / Math.max(.01, currentWeapon().boltCycle)) * Math.PI) : 0;
   const inspectMotion = state.inspectTimer > 0 ? Math.sin((1.2 - state.inspectTimer) / 1.2 * Math.PI) : 0;
   const meleeMotion = state.meleeTimer > 0 ? Math.sin((.35 - state.meleeTimer) / .35 * Math.PI) : 0;
   const idleMotion = state.idleTimer === 0 ? Math.sin(performance.now() * .0012) * .08 : 0;
   gun.position.x = THREE.MathUtils.lerp(gun.position.x, targetX, Math.min(1, delta * 12));
   gun.position.y = THREE.MathUtils.lerp(gun.position.y, -.28 + bob - landingKick - state.weaponKick - state.equipTimer * .7 - (sprinting && moving ? .12 : 0), Math.min(1, delta * 22));
-  gun.rotation.z = THREE.MathUtils.lerp(gun.rotation.z, reloadMotion * (currentWeapon().ammo ? .55 : -.72) + inspectMotion * 1.15 + idleMotion + (sprinting && moving ? -.32 : 0), Math.min(1, delta * 14));
-  gun.rotation.x = THREE.MathUtils.lerp(gun.rotation.x, reloadMotion * .35 + inspectMotion * .25 - meleeMotion * .75 + (sprinting && moving ? -.22 : 0), Math.min(1, delta * 14));
+  gun.rotation.z = THREE.MathUtils.lerp(gun.rotation.z, reloadMotion * (currentWeapon().ammo ? .55 : -.72) + boltMotion * .22 + inspectMotion * 1.15 + idleMotion + (sprinting && moving ? -.32 : 0), Math.min(1, delta * 14));
+  gun.rotation.x = THREE.MathUtils.lerp(gun.rotation.x, reloadMotion * .35 - boltMotion * .18 + inspectMotion * .25 - meleeMotion * .75 + (sprinting && moving ? -.22 : 0), Math.min(1, delta * 14));
   state.weaponKick = THREE.MathUtils.lerp(state.weaponKick, 0, Math.min(1, delta * 16));
   const profile = RECOIL_PROFILES[weapon.recoil];
   const pitchRecovery = Math.min(state.recoilPitch, profile.recovery * delta);
@@ -1981,6 +2010,15 @@ function updatePlayer(delta) {
   state.damageKick -= damageRecovery;
 }
 
+function triggerArenaShift() {
+  const features = state.worldFeatures;
+  if (!features?.arenaWalls.length) return false;
+  features.arenaShifted = !features.arenaShifted;
+  features.arenaShiftTimer = 90;
+  announce('ARENA SHIFT', 2);
+  return true;
+}
+
 function updateWorldFeatures(delta) {
   const features = state.worldFeatures;
   if (!features) return;
@@ -1992,6 +2030,17 @@ function updateWorldFeatures(delta) {
   features.elevator.userData.collisionBox.setFromObject(features.elevator);
   features.movingPlatform.position.x = 12 + Math.sin(performance.now() * .0007) * 5;
   features.movingPlatform.userData.collisionBox.setFromObject(features.movingPlatform);
+  features.arenaShiftTimer -= delta;
+  if (features.arenaShiftTimer <= 0) triggerArenaShift();
+  for (const wall of features.arenaWalls) {
+    const target = arenaShiftPosition(wall.userData.shiftIndex, features.arenaShifted);
+    wall.position.x = THREE.MathUtils.lerp(wall.position.x, target.x, Math.min(1, delta * .7));
+    wall.position.z = THREE.MathUtils.lerp(wall.position.z, target.z, Math.min(1, delta * .7));
+    wall.rotation.y = THREE.MathUtils.lerp(wall.rotation.y, target.rotation, Math.min(1, delta * .7));
+    wall.userData.collisionBox.setFromObject(wall);
+    const shiftedPoints = coverPointsForBox(wall.userData.collisionBox, 0);
+    wall.userData.coverPoints.forEach((point, index) => Object.assign(point, shiftedPoints[index]));
+  }
   if (!features.portalCooldown) {
     const portalIndex = features.portals.findIndex((portal) => portal.position.distanceTo(camera.position) < 2);
     if (portalIndex >= 0) {
@@ -2023,6 +2072,7 @@ function updateTimers(delta) {
   shotEffects.update(delta);
   playerNoise.timer = Math.max(0, playerNoise.timer - delta);
   state.equipTimer = Math.max(0, state.equipTimer - delta);
+  state.boltTimer = Math.max(0, state.boltTimer - delta);
   state.inspectTimer = Math.max(0, state.inspectTimer - delta);
   state.meleeTimer = Math.max(0, state.meleeTimer - delta);
   state.idleTimer = Math.max(0, state.idleTimer - delta);
@@ -2108,7 +2158,7 @@ function updateTimers(delta) {
     state.chaosEffectTimer -= delta;
     if (state.chaosEffectTimer <= 0) state.chaosModifier = null;
     if (state.chaosTimer <= 0) {
-      const modifier = CHAOS_MODIFIERS[Math.floor(state.rng() * CHAOS_MODIFIERS.length)];
+      const modifier = ROTATING_CHAOS_MODIFIERS[Math.floor(state.rng() * ROTATING_CHAOS_MODIFIERS.length)];
       state.chaosModifier = modifier.id;
       state.chaosTimer = 28;
       state.chaosEffectTimer = 18;
@@ -2650,6 +2700,7 @@ if (testMode) {
     setTime(value) {
       if (!['dawn', 'day', 'sunset', 'night'].includes(value)) return false;
       applyTime(value);
+      syncFlashlight();
       updateHud();
       return true;
     },
@@ -2667,10 +2718,11 @@ if (testMode) {
     grantAttachment(id) {
       if (!ATTACHMENTS.some((attachment) => attachment.id === id) || state.attachments.includes(id)) return false;
       state.attachments.push(id);
+      syncFlashlight();
       return true;
     },
     applyPerk,
-    getRenderState: () => ({ background: scene.background.getHexString(), toneMapping: renderer.toneMapping, exposure: renderer.toneMappingExposure, pixelRatio: renderer.getPixelRatio(), sun: sun.intensity }),
+    getRenderState: () => ({ background: scene.background.getHexString(), toneMapping: renderer.toneMapping, exposure: renderer.toneMappingExposure, pixelRatio: renderer.getPixelRatio(), sun: sun.intensity, flashlight: flashlight.intensity }),
     readCenterPixel() {
       renderer.render(scene, camera);
       const pixel = new Uint8Array(4);
@@ -2707,8 +2759,9 @@ if (testMode) {
       enemy.group.updateMatrixWorld(true);
       return true;
     },
+    triggerArenaShift,
     getPlayer: () => ({ health: state.health, maxHealth: state.maxHealth, position: camera.position.toArray(), weapon: currentWeapon().name, weaponQuality: currentWeapon().quality, ammo: currentWeapon().ammo, reserve: currentWeapon().reserve, reloading: state.reloading, ads: state.ads, crouching: state.crouching, grounded: state.grounded, vaulting: Boolean(state.vault), verticalVelocity: state.verticalVelocity }),
-    getGameState: () => ({ phase: state.phase, mode: state.mode, wave: state.wave, score: state.score, run: { ...state.run }, modifier: state.chaosModifier, recoilShot: state.recoilShot, effects: shotEffects.activeCount(), effectCapacity: shotEffects.capacity, comboKills: state.comboKills, environmentKills: state.runStats.environmentKills, mission: state.mission ? { ...state.mission } : null })
+    getGameState: () => ({ phase: state.phase, mode: state.mode, wave: state.wave, score: state.score, run: { ...state.run }, modifier: state.chaosModifier, recoilShot: state.recoilShot, effects: shotEffects.activeCount(), effectCapacity: shotEffects.capacity, comboKills: state.comboKills, environmentKills: state.runStats.environmentKills, mission: state.mission ? { ...state.mission } : null, arenaShifted: state.worldFeatures?.arenaShifted ?? false, boltCycling: state.boltTimer > 0 })
   });
 }
 

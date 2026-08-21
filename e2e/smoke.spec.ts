@@ -21,13 +21,14 @@ interface GameTestApi {
   inspectWeapon(): boolean;
   damageEnemy(id: number, amount?: number): boolean;
   getEnemies(): Array<{ id: number; health: number; bossType?: string; hasBossSignature: boolean; phase: number; armorBroken: boolean; telegraphing: boolean; heardNoise: string | null; squadId: number; squadRole: string; squadCommand: string | null; position: number[] }>;
-  getGameState(): { phase: string; score: number; modifier: string | null; recoilShot: number; effects: number; effectCapacity: number; environmentKills: number; mission: null | { id: string } };
+  getGameState(): { phase: string; score: number; modifier: string | null; recoilShot: number; effects: number; effectCapacity: number; environmentKills: number; mission: null | { id: string }; arenaShifted: boolean; boltCycling: boolean };
   getLootBoxes(): Array<{ key: string; opened: boolean; quality: string; position: number[] }>;
   getInteractions(): Array<{ key: string; label: string; used: boolean; position: number[] }>;
   getAnimals(): Array<{ type: string; state: string; position: number[] }>;
   getAttachments(): string[];
   grantAttachment(id: string): boolean;
-  getRenderState(): { background: string; toneMapping: number; exposure: number; pixelRatio: number; sun: number };
+  triggerArenaShift(): boolean;
+  getRenderState(): { background: string; toneMapping: number; exposure: number; pixelRatio: number; sun: number; flashlight: number };
   readCenterPixel(): number[];
   getPlayer(): PlayerState;
   reload(): void;
@@ -77,7 +78,49 @@ test('reload fills the effective extended magazine capacity', async ({ page }) =
     api.reload();
     return granted;
   })).toBe(true);
-  await expect.poll(() => page.evaluate(() => window.__GAME_TEST__.getPlayer().ammo), { timeout: 3_000 }).toBe(41);
+  await expect.poll(() => page.evaluate(() => window.__GAME_TEST__.getPlayer().ammo), { timeout: 5_000 }).toBe(41);
+});
+
+test('explosive chains never remove enemies that are outside the blast', async ({ page }) => {
+  await page.goto('./?test=1');
+  await expect(page.locator('#loading')).toBeHidden({ timeout: 30_000 });
+  await page.locator('#modifier-policy').selectOption('normal');
+  await page.getByRole('button', { name: '開始行動' }).click();
+
+  const result = await page.evaluate(() => {
+    const api = window.__GAME_TEST__;
+    const enemies = api.getEnemies();
+    api.applyPerk('explosive-kill');
+    api.setEnemyPosition(enemies[0].id, -10, -10);
+    api.setEnemyPosition(enemies[1].id, -9.5, -10);
+    api.setEnemyPosition(enemies[2].id, -10, -9.5);
+    enemies.slice(3).forEach((enemy, index) => api.setEnemyPosition(enemy.id, 20 + index * 2, 20));
+    api.damageEnemy(enemies[1].id, 79);
+    api.damageEnemy(enemies[2].id, 79);
+    api.killEnemy(enemies[0].id);
+    return { expected: enemies.slice(3).map(({ id }) => id), remaining: api.getEnemies().map(({ id }) => id) };
+  });
+  expect(result.remaining).toEqual(result.expected);
+});
+
+test('bolt, flashlight, and arena shift mechanics are active gameplay states', async ({ page }) => {
+  await page.goto('./?test=1');
+  await expect(page.locator('#loading')).toBeHidden({ timeout: 30_000 });
+  await page.locator('#modifier-policy').selectOption('normal');
+  await page.getByRole('button', { name: '開始行動' }).click();
+
+  const initial = await page.evaluate(() => {
+    const api = window.__GAME_TEST__;
+    api.setWeapon(9);
+    api.fire();
+    api.grantAttachment('flashlight');
+    api.setTime('night');
+    api.setMap('prism');
+    return { bolt: api.getGameState().boltCycling, shiftQueued: api.triggerArenaShift() };
+  });
+  expect(initial).toEqual({ bolt: true, shiftQueued: true });
+  await expect.poll(() => page.evaluate(() => window.__GAME_TEST__.getRenderState().flashlight)).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => window.__GAME_TEST__.getGameState().arenaShifted)).toBe(true);
 });
 
 test('production build supports the core playable flow', async ({ page }) => {

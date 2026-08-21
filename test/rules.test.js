@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { ATTACHMENTS, BOSSES, CHAOS_MODIFIERS, CONTENT_MANIFEST, DIFFICULTIES, ENEMY_TYPES, MAPS, MODES, PERKS, WEAPONS, WEAPON_QUALITIES, circleIntersectsRectangle, createDailyChallenge, createRng, createRun, createWave, pickPerks, rollElite, shotDamage } from '../src/rules.js';
+import { ATTACHMENTS, BOSSES, CHAOS_MODIFIERS, CONTENT_MANIFEST, DIFFICULTIES, ENEMY_TYPES, MAPS, MODES, PERKS, ROTATING_CHAOS_MODIFIERS, WEAPONS, WEAPON_QUALITIES, arenaShiftPosition, circleIntersectsRectangle, createDailyChallenge, createRng, createRun, createWave, pickPerks, rollElite, shotDamage } from '../src/rules.js';
 import { SAVE_KEY, SAVE_VERSION, loadSave, saveGame } from '../src/core/SaveManager.ts';
 import { createFixedStep } from '../src/core/GameLoop.ts';
 import { stressTarget, summarizePerformance } from '../src/debug/PerformanceHarness.ts';
@@ -25,12 +25,16 @@ test('content, seed, and progression rules stay intact', () => {
   assert.equal(MAPS.filter(({ available }) => available !== false).length, 3);
   assert.equal(Object.keys(MODES).length, 5);
   assert.equal(CHAOS_MODIFIERS.length, 14);
+  assert.deepEqual(ROTATING_CHAOS_MODIFIERS.map(({ id }) => id), ['low-gravity', 'fast-player', 'fast-enemies', 'headshot-bonus', 'explosive-world', 'random-weapon', 'infinite-ammo', 'headshot-only']);
   assert.equal(Object.keys(ENEMY_TYPES).length, 12);
   assert.equal(BOSSES.length, 5);
   assert.equal(CONTENT_MANIFEST.weapons, WEAPONS);
   assert.equal(CONTENT_MANIFEST.attachments, ATTACHMENTS);
   assert.equal(ATTACHMENTS.length, 14);
   assert.deepEqual(WEAPON_QUALITIES.map(({ label }) => label), ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary']);
+  assert.equal(WEAPONS.find(({ id }) => id === 'bolt-sniper').boltCycle, .85);
+  assert.equal(WEAPONS.find(({ id }) => id === 'heavy-revolver').revolverReload, true);
+  assert.notDeepEqual(arenaShiftPosition(0, false), arenaShiftPosition(0, true));
   assert.equal(PERKS.length, 16);
   assert.equal(new Set(PERKS.map(({ id }) => id)).size, 16);
   assert.equal(new Set(WEAPONS.map(({ id }) => id)).size, WEAPONS.length);
