@@ -106,6 +106,20 @@ test('legacy progress migrates once into a versioned save envelope', () => {
   assert.equal(saved.statistics.highestScore, 900);
 });
 
+test('failed legacy migration preserves readable progress and the original save', () => {
+  const legacy = JSON.stringify({ kills: 7, highestScore: 900 });
+  const values = new Map([['wildfront-progress', legacy]]);
+  const loaded = loadSave({
+    getItem: (key) => values.get(key) ?? null,
+    setItem: () => { throw new Error('Storage quota exceeded'); },
+    removeItem: (key) => values.delete(key)
+  });
+  assert.equal(loaded.progress.kills, 7);
+  assert.equal(loaded.statistics.highestScore, 900);
+  assert.equal(values.get('wildfront-progress'), legacy);
+  assert.equal(values.has(SAVE_KEY), false);
+});
+
 test('run results accumulate into persistent statistics and achievements', () => {
   assert.equal(createProgress({ kills: 'corrupt' }).kills, 0);
   const progress = recordRun(createProgress(), {

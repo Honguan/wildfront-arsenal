@@ -124,8 +124,12 @@ export function loadSave(storage: StorageLike): SaveData {
     const legacy = storage.getItem(LEGACY_SAVE_KEY);
     if (!legacy) return createSave();
     const migrated = createSave(JSON.parse(legacy));
-    storage.setItem(SAVE_KEY, JSON.stringify(migrated));
-    storage.removeItem(LEGACY_SAVE_KEY);
+    try {
+      storage.setItem(SAVE_KEY, JSON.stringify(migrated));
+      storage.removeItem(LEGACY_SAVE_KEY);
+    } catch {
+      return migrated;
+    }
     return migrated;
   } catch {
     return createSave();

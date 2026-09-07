@@ -115,7 +115,9 @@ function freshRunStats() {
   return { kills: 0, deaths: 0, shots: 0, hits: 0, headshots: 0, bossKills: 0, eliteKills: 0, environmentKills: 0, untouchedWaves: 0, waveDamage: 0, weaponShots: {}, weaponKills: {}, bossTypes: {} };
 }
 
-const savedGame = loadSave(localStorage);
+let storage;
+try { storage = localStorage; } catch { /* Browser storage may be disabled. */ }
+const savedGame = loadSave(storage);
 let progress = savedGame.progress;
 let pendingDaily = null;
 
@@ -145,6 +147,7 @@ const state = {
   custom: null,
   infiniteAmmo: false,
   runStarted: 0,
+  runTime: 0,
   runRecorded: true,
   runStats: freshRunStats(),
   settings: savedGame.settings,
@@ -782,14 +785,47 @@ function clearObjective() {
 }
 
 function setPhase(phase) {
+  if (state.phase === 'playing') state.runTime += (performance.now() - state.runStarted) / 1000;
+  if (phase === 'playing') state.runStarted = performance.now();
+  keys.clear();
+  state.fireHeld = false;
+  state.ads = false;
+  state.jumpRequested = false;
   state.phase = phase;
   for (const id of ['menu', 'pause', 'upgrade', 'game-over', 'victory', 'settings-panel', 'controls-panel', 'statistics-panel', 'loadout-panel', 'armory-panel', 'challenges-panel', 'credits-panel']) $(`#${id}`).classList.add('hidden');
-  hud.root.classList.toggle('hidden', phase === 'menu');
+  hud.root.classList.toggle('hidden', phase !== 'playing');
   if (phase === 'menu') $('#menu').classList.remove('hidden');
   if (phase === 'paused') $('#pause').classList.remove('hidden');
   if (phase === 'upgrade') $('#upgrade').classList.remove('hidden');
   if (phase === 'gameover') $('#game-over').classList.remove('hidden');
   if (phase === 'victory') $('#victory').classList.remove('hidden');
+  const visible = document.querySelector('.modal:not(.hidden)');
+  if (visible) visible.querySelector('button, input, select')?.focus({ preventScroll: true });
+  else if (phase === 'menu') { updateBriefing(); $('#start').focus({ preventScroll: true }); }
+  else document.activeElement?.blur();
+}
+
+let panelReturnFocus = null;
+function openPanel(id) {
+  panelReturnFocus = document.activeElement;
+  document.querySelectorAll('.panel').forEach((panel) => panel.classList.add('hidden'));
+  const panel = $(`#${id}`);
+  panel.classList.remove('hidden');
+  hud.root.classList.add('hidden');
+  panel.scrollTop = 0;
+  panel.querySelector('input, select, button')?.focus({ preventScroll: true });
+}
+
+function closePanel() {
+  setPhase(state.phase);
+  if (panelReturnFocus?.isConnected && panelReturnFocus.getClientRects().length) panelReturnFocus.focus({ preventScroll: true });
+  panelReturnFocus = null;
+}
+
+function persistProgress() {
+  const saved = saveGame(storage, progress, state.settings);
+  $('#save-status').classList.toggle('hidden', saved);
+  $('#save-status').textContent = saved ? '' : '目前無法儲存進度與設定；關閉頁面後，本次變更可能遺失。';
 }
 
 function announce(text, seconds = 1.8) {
@@ -1066,6 +1102,7 @@ function spawnWave() {
 }
 
 function boundedNumber(selector, minimum, maximum, fallback) {
+  if (!$(selector).value.trim()) return fallback;
   const value = Number($(selector).value);
   return Number.isFinite(value) ? THREE.MathUtils.clamp(value, minimum, maximum) : fallback;
 }
@@ -1147,6 +1184,7 @@ function startGame() {
     custom,
     infiniteAmmo: custom?.infiniteAmmo ?? false,
     runStarted: performance.now(),
+    runTime: 0,
     runRecorded: false,
     runStats: freshRunStats(),
     performanceLevel: 0,
@@ -1339,7 +1377,9 @@ function damageEnemy(enemy, damage, headshot, environment = false, context = {})
   dyingEnemies.push(enemy);
   announce([scored.combo, ...scored.bonuses, `${enemy.config.label} DOWN`].filter(Boolean).join(' · '), .8);
   updateHud();
-  if (state.daily && state.runStats.kills >= state.daily.goal) finishRun(true);
+  if (state.daily && state.runStats.kills >= state.daily.goal) queueMicrotask(() => {
+    if (!state.runRecorded) finishRun(true);
+  });
 }
 
 function explodeBarrel(barrel) {
@@ -1542,17 +1582,16 @@ function damagePlayer(amount, source = null) {
 }
 
 function finishRun(victory) {
-  if (!state.runRecorded) {
-    state.runRecorded = true;
-    progress = recordRun(progress, {
-      ...state.runStats,
-      playTime: (performance.now() - state.runStarted) / 1000,
-      deaths: victory ? 0 : 1,
-      wave: state.wave,
-      score: state.score
-    });
-    saveGame(localStorage, progress, state.settings);
-  }
+  if (state.runRecorded) return;
+  state.runRecorded = true;
+  progress = recordRun(progress, {
+    ...state.runStats,
+    playTime: state.runTime + (state.phase === 'playing' ? (performance.now() - state.runStarted) / 1000 : 0),
+    deaths: victory ? 0 : 1,
+    wave: state.wave,
+    score: state.score
+  });
+  persistProgress();
   setPhase(victory ? 'victory' : 'gameover');
   $('#final-wave').textContent = state.wave;
   $('#final-score').textContent = state.score.toLocaleString();
@@ -2348,7 +2387,7 @@ $('#start').addEventListener('click', startGame);
 $('#retry').addEventListener('click', startGame);
 $('#victory-retry').addEventListener('click', startGame);
 $('#restart').addEventListener('click', startGame);
-$('#resume').addEventListener('click', () => controls.lock());
+$('#resume').addEventListener('click', () => { if (testMode) setPhase('playing'); else controls.lock(); });
 $('#copy-seed').addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText(state.run.seed);
@@ -2416,27 +2455,16 @@ function applySettings() {
   $('#particle-value').textContent = `${state.settings.particleScale}%`;
   hud.hit.style.setProperty('--hit-scale', state.settings.hitSize / 100);
   document.querySelectorAll('#crosshair i').forEach((line) => { line.style.background = state.settings.crosshair; });
-  saveGame(localStorage, progress, state.settings);
+  persistProgress();
 }
 
 for (const input of document.querySelectorAll('#settings-panel input, #settings-panel select')) input.addEventListener('input', applySettings);
-let settingsReturnPhase = 'paused';
-$('#open-settings').addEventListener('click', () => {
-  settingsReturnPhase = 'paused';
-  $('#pause').classList.add('hidden');
-  $('#settings-panel').classList.remove('hidden');
-});
-$('#menu-settings').addEventListener('click', () => {
-  settingsReturnPhase = 'menu';
-  $('#menu').classList.add('hidden');
-  $('#settings-panel').classList.remove('hidden');
-});
-$('#close-settings').addEventListener('click', () => setPhase(settingsReturnPhase));
-$('#open-controls').addEventListener('click', () => {
-  $('#pause').classList.add('hidden');
-  $('#controls-panel').classList.remove('hidden');
-});
-$('#close-controls').addEventListener('click', () => setPhase('paused'));
+$('#open-settings').addEventListener('click', () => openPanel('settings-panel'));
+$('#menu-settings').addEventListener('click', () => openPanel('settings-panel'));
+$('#close-settings').addEventListener('click', closePanel);
+$('#open-controls').addEventListener('click', () => openPanel('controls-panel'));
+$('#menu-controls').addEventListener('click', () => openPanel('controls-panel'));
+$('#close-controls').addEventListener('click', closePanel);
 $('#statistics').addEventListener('click', () => {
   const summary = summarizeProgress(progress);
   const labels = {
@@ -2457,18 +2485,17 @@ $('#statistics').addEventListener('click', () => {
   }
   const unlocked = ACHIEVEMENTS.filter(({ id }) => progress.achievements.includes(id)).map(({ name }) => name);
   $('#achievement-list').textContent = unlocked.length ? `Unlocked · ${unlocked.join(' · ')}` : '尚未解鎖成就';
-  $('#statistics-panel').classList.remove('hidden');
+  openPanel('statistics-panel');
 });
-$('#close-statistics').addEventListener('click', () => $('#statistics-panel').classList.add('hidden'));
+$('#close-statistics').addEventListener('click', closePanel);
 for (const [button, panel] of [['loadout', 'loadout-panel'], ['armory', 'armory-panel'], ['credits', 'credits-panel']]) {
-  $(`#${button}`).addEventListener('click', () => $(`#${panel}`).classList.remove('hidden'));
+  $(`#${button}`).addEventListener('click', () => openPanel(panel));
 }
 $('#challenges').addEventListener('click', () => {
-  $('#daily').click();
-  $('#challenge-detail').textContent = $('#daily-summary').textContent;
-  $('#challenges-panel').classList.remove('hidden');
+  $('#challenge-detail').textContent = describeDaily(todayChallenge());
+  openPanel('challenges-panel');
 });
-document.querySelectorAll('.close-menu-panel').forEach((button) => button.addEventListener('click', () => button.closest('section').classList.add('hidden')));
+document.querySelectorAll('.close-menu-panel').forEach((button) => button.addEventListener('click', closePanel));
 for (const button of document.querySelectorAll('.menu-button')) {
   button.addEventListener('click', () => {
     clearEnemies();
@@ -2526,16 +2553,27 @@ controls.addEventListener('unlock', () => {
 });
 
 document.addEventListener('keydown', (event) => {
+  const panel = document.querySelector('.modal:not(.hidden)');
+  if (panel && event.code === 'Tab') {
+    const items = [...panel.querySelectorAll('button, input, select, summary, a[href]')].filter((item) => !item.disabled && item.getClientRects().length);
+    const first = items[0];
+    const last = items.at(-1);
+    if (event.shiftKey && (document.activeElement === first || !panel.contains(document.activeElement))) { event.preventDefault(); last?.focus(); }
+    else if (!event.shiftKey && (document.activeElement === last || !panel.contains(document.activeElement))) { event.preventDefault(); first?.focus(); }
+    return;
+  }
+  if (event.code === 'Escape') {
+    if (panel?.querySelector('#close-settings, #close-controls, #close-statistics, .close-menu-panel')) { event.preventDefault(); closePanel(); }
+    else if (state.phase === 'playing') { setPhase('paused'); if (controls.isLocked) controls.unlock(); }
+    return;
+  }
+  if (state.phase !== 'playing' || event.target.closest('input, select, textarea, button, [contenteditable="true"]')) return;
   keys.add(event.code);
-  if (event.code === 'Space' && !event.repeat && state.phase === 'playing') {
+  if (event.code === 'Space' && !event.repeat) {
     state.jumpRequested = true;
     event.preventDefault();
   }
   if ((event.code === 'ControlLeft' || event.code === 'ControlRight') && !event.repeat && state.settings.toggleCrouch) state.crouchToggled = !state.crouchToggled;
-  if (event.code === 'Escape' && testMode && state.phase === 'playing') {
-    setPhase('paused');
-    if (controls.isLocked) controls.unlock();
-  }
   if (event.code === 'KeyR') reload();
   if (event.code === 'KeyE' && !event.repeat) interactNearby();
   if (event.code === 'KeyF' && !event.repeat) inspectWeapon();
@@ -2544,6 +2582,7 @@ document.addEventListener('keydown', (event) => {
 });
 document.addEventListener('keyup', (event) => keys.delete(event.code));
 document.addEventListener('mousedown', (event) => {
+  if (state.phase !== 'playing' || !controls.isLocked && !testMode) return;
   if (event.button === 0) {
     state.fireHeld = true;
     fire();
@@ -2554,7 +2593,7 @@ document.addEventListener('mouseup', (event) => {
   if (event.button === 0) state.fireHeld = false;
   if (event.button === 2 && !state.settings.toggleAds) state.ads = false;
 });
-document.addEventListener('contextmenu', (event) => event.preventDefault());
+document.addEventListener('contextmenu', (event) => { if (state.phase === 'playing') event.preventDefault(); });
 window.addEventListener('blur', () => {
   keys.clear();
   state.jumpRequested = false;
@@ -2585,7 +2624,7 @@ WEAPONS.forEach((weapon, index) => {
 });
 for (let slot = 0; slot < 5; slot += 1) {
   const label = document.createElement('label');
-  label.textContent = `Slot ${slot + 1}`;
+  label.textContent = `Slot ${slot + 1} · 按鍵 ${slot + 1}`;
   const select = document.createElement('select');
   for (const [index, weapon] of WEAPONS.entries()) select.add(new Option(`${weapon.category} · ${weapon.name}`, String(index), false, index === slot));
   label.append(select);
@@ -2619,26 +2658,86 @@ for (const modifier of CHAOS_MODIFIERS) {
   $('#custom-modifier').append(option);
 }
 
-$('#daily').addEventListener('click', () => {
+function todayChallenge() {
   const now = new Date();
-  const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  pendingDaily = createDailyChallenge(day);
+  return createDailyChallenge(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`);
+}
+
+function describeDaily(daily) {
+  return `${daily.date} · ${MAPS.find(({ id }) => id === daily.map).name} · ${WEAPONS[daily.weapon].name} · ${CHAOS_MODIFIERS.find(({ id }) => id === daily.modifier).label} · 目標 ${daily.goal} 擊殺`;
+}
+
+let previousSetup = null;
+const setupIds = ['seed', 'map', 'mode', 'difficulty', 'modifier-policy'];
+function updateBriefing() {
+  const mode = $('#mode').value;
+  $('#briefing-mode').textContent = MODES[mode].label;
+  $('#mode-description').textContent = pendingDaily ? `達成 ${pendingDaily.goal} 次擊殺，完成每日挑戰。` : mode === 'hunt' ? '完成 3 波獵殺，每波會加入精英敵人。' : MODES[mode].description;
+  $('#briefing-map').textContent = MAPS.find(({ id }) => id === $('#map').value)?.name ?? '隨機戰區';
+  $('#briefing-difficulty').textContent = $('#difficulty').selectedOptions[0].textContent;
+  const policy = $('#modifier-policy').value;
+  $('#briefing-modifier').textContent = pendingDaily ? CHAOS_MODIFIERS.find(({ id }) => id === pendingDaily.modifier).label : policy === 'random' ? '每局隨機規則' : policy === 'custom' && $('#custom-enabled').checked ? $('#custom-modifier').selectedOptions[0].textContent : '無額外規則';
+  $('#run-kind').textContent = pendingDaily ? '每日挑戰' : $('#custom-enabled').checked ? '自訂行動' : '一般行動';
+  $('#cancel-daily').classList.toggle('hidden', !pendingDaily);
+  $('#daily-summary').textContent = pendingDaily ? describeDaily(pendingDaily) : '';
+  $('#career-summary').textContent = `最高波次 ${progress.highestWave} · 最高分 ${progress.highestScore.toLocaleString()} · 成就 ${progress.achievements.length}/${ACHIEVEMENTS.length}`;
+}
+
+$('#daily').addEventListener('click', () => {
+  if (!pendingDaily) previousSetup = { values: setupIds.map((id) => $(`#${id}`).value), custom: $('#custom-enabled').checked };
+  pendingDaily = todayChallenge();
   $('#seed').value = pendingDaily.seed;
   $('#map').value = pendingDaily.map;
   $('#mode').value = 'survival';
   $('#difficulty').value = 'normal';
   $('#custom-enabled').checked = false;
-  const modifier = CHAOS_MODIFIERS.find(({ id }) => id === pendingDaily.modifier).label;
-  $('#daily-summary').textContent = `${day} · ${MAPS.find(({ id }) => id === pendingDaily.map).name} · ${WEAPONS[pendingDaily.weapon].name} · ${modifier} · ${pendingDaily.goal} kills`;
+  updateBriefing();
 });
-
-for (const id of ['seed', 'map', 'mode', 'difficulty', 'custom-enabled']) {
-  $( `#${id}` ).addEventListener(id === 'seed' ? 'input' : 'change', () => {
-    if (!pendingDaily) return;
+$('#accept-daily').addEventListener('click', () => { closePanel(); $('#daily').click(); $('#start').focus(); });
+$('#cancel-daily').addEventListener('click', () => {
+  if (previousSetup) {
+    setupIds.forEach((id, index) => { $(`#${id}`).value = previousSetup.values[index]; });
+    $('#custom-enabled').checked = previousSetup.custom;
+  }
+  pendingDaily = null;
+  previousSetup = null;
+  updateBriefing();
+  $('#daily').focus();
+});
+$('#random-seed').addEventListener('click', () => {
+  $('#seed').value = crypto.randomUUID().slice(0, 8).toUpperCase();
+  $('#seed').dispatchEvent(new Event('input', { bubbles: true }));
+});
+$('#modifier-policy').addEventListener('change', () => {
+  if ($('#modifier-policy').value === 'custom') {
+    $('#custom-enabled').checked = true;
+    $('.custom-panel').open = true;
+  }
+});
+for (const input of document.querySelectorAll('#menu input, #menu select')) {
+  input.addEventListener(input.id === 'seed' ? 'input' : 'change', () => {
     pendingDaily = null;
-    $('#daily-summary').textContent = '';
+    previousSetup = null;
+    updateBriefing();
   });
 }
+for (const panel of document.querySelectorAll('.modal')) {
+  const heading = panel.querySelector('h2');
+  heading.id = `${panel.id}-title`;
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-modal', 'true');
+  panel.setAttribute('aria-labelledby', heading.id);
+}
+function filterArmory() {
+  const term = $('#armory-search').value.trim().toLocaleLowerCase();
+  const cards = [...$('#armory-list').children];
+  for (const card of cards) card.classList.toggle('hidden', !card.textContent.toLocaleLowerCase().includes(term));
+  const count = cards.filter((card) => !card.classList.contains('hidden')).length;
+  $('#armory-count').textContent = `${count} / ${cards.length} 項裝備`;
+  $('#armory-empty').classList.toggle('hidden', count !== 0);
+}
+$('#armory-search').addEventListener('input', filterArmory);
+filterArmory();
 
 if (testMode) {
   window.__GAME_TEST__ = Object.freeze({
@@ -2791,6 +2890,7 @@ $('#setting-reduce-shake').checked = state.settings.reduceShake;
 $('#setting-subtitles').checked = state.settings.subtitles;
 applySettings();
 $('#seed').value = Date.now().toString(36).toUpperCase();
+updateBriefing();
 if (diagnostic) startDiagnostic();
 updateHud();
 $('#release-version').textContent = `v${APP_VERSION}${BUILD_SHA ? ` · ${BUILD_SHA}` : ''}`;
@@ -2803,5 +2903,7 @@ async function finishLoading() {
   }
   $('#loading-status').textContent = `Ready · ${capabilities.profile.toUpperCase()} · ${capabilities.webgpu ? 'WebGPU' : capabilities.webgl2 ? 'WebGL 2' : 'WebGL'}`;
   loadingScreen.classList.add('hidden');
+  window.removeEventListener('error', showCoreLoadError);
+  window.removeEventListener('unhandledrejection', showCoreLoadError);
 }
 finishLoading();

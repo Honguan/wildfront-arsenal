@@ -3,7 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#07130f" />
+    <meta name="theme-color" content="#0b100e" />
+    <meta name="description" content="Wildfront Arsenal：免安裝的瀏覽器 Roguelite FPS。選擇戰區、配置武器，挑戰生存波次與每日任務。" />
     <link rel="icon" href="data:," />
     <title>Wildfront Arsenal</title>
     <link rel="stylesheet" href="/src/style.css" />
@@ -24,9 +25,13 @@
     <canvas id="game" aria-label="Wildfront Arsenal 3D 遊戲畫面"></canvas>
 
     <main id="menu" class="panel screen">
-      <p class="eyebrow">ROGUELITE FPS</p>
+      <header class="menu-header"><a class="brand" href="#menu" aria-label="Wildfront Arsenal 首頁">WA<span>WILDFRONT / ARSENAL</span></a><span class="status-chip">戰備室 · 本機進度</span></header>
+      <div class="menu-layout">
+      <div class="deployment">
+      <p class="eyebrow">01 / DEPLOYMENT</p>
       <h1>WILDFRONT<br /><span>ARSENAL</span></h1>
-      <p class="lead">穿越多變戰區。切換武器、撐過波次，讓地圖、天氣與升級改變你的打法。</p>
+      <p class="lead">選擇戰區，配置裝備。你的下一場行動從這裡開始。</p>
+      <div class="section-heading"><h2>出戰設定</h2><span>鍵盤 + 滑鼠</span></div>
       <div class="setup-grid">
         <div>
           <label for="mode">模式</label>
@@ -64,13 +69,13 @@
           </select>
         </div>
       </div>
-      <label for="seed">Run Seed</label>
-      <input id="seed" maxlength="32" autocomplete="off" />
+      <label for="seed">行動種子 / Run Seed</label>
+      <div class="seed-row"><input id="seed" maxlength="32" autocomplete="off" spellcheck="false" aria-describedby="seed-help" /><button id="random-seed" type="button">隨機種子</button></div>
+      <p id="seed-help" class="field-help">相同種子與設定可重玩同一場行動。</p>
       <button id="start" class="primary">開始行動</button>
-      <button id="daily">Today's Challenge</button>
-      <p id="daily-summary" class="daily-summary"></p>
+
       <details class="custom-panel">
-        <summary>Custom Game</summary>
+        <summary>Custom Game <span>自訂規則</span></summary>
         <label class="check"><input id="custom-enabled" type="checkbox" /> 啟用自訂規則</label>
         <div class="custom-grid">
           <label>Enemy Count<input id="custom-enemy-count" type="number" min="1" max="100" value="12" /></label>
@@ -85,12 +90,26 @@
         <label class="check"><input id="custom-boss" type="checkbox" /> 每波加入 Boss</label>
         <label class="check"><input id="custom-infinite-ammo" type="checkbox" /> Infinite Ammo</label>
       </details>
-      <div class="menu-links">
+      </div>
+      <aside class="briefing" aria-label="任務簡報">
+        <p class="eyebrow">02 / FIELD BRIEFING</p>
+        <div class="briefing-title"><h2 id="briefing-mode">Survival</h2><span id="run-kind" class="status-chip">一般行動</span></div>
+        <p id="mode-description" class="objective-text"></p>
+        <dl class="briefing-facts"><div><dt>戰區</dt><dd id="briefing-map"></dd></div><div><dt>威脅</dt><dd id="briefing-difficulty"></dd></div><div><dt>世界規則</dt><dd id="briefing-modifier"></dd></div></dl>
+        <div class="daily-card"><p class="eyebrow">DAILY CONTRACT</p><h3>每日挑戰</h3><p>固定戰區、武器與規則。達成擊殺目標，完成今日任務。</p>
+          <button id="daily">Today's Challenge</button><button id="cancel-daily" class="hidden">返回一般行動</button><p id="daily-summary" class="daily-summary" role="status"></p>
+        </div>
+        <div class="section-heading"><h3>整備與紀錄</h3><span>FIELD SERVICES</span></div>
+      <nav class="menu-links" aria-label="整備與紀錄">
         <button id="loadout">Loadout</button><button id="armory">Armory</button><button id="challenges">Challenges</button>
         <button id="statistics">Statistics / Achievements</button><button id="menu-settings">Settings</button><button id="credits">Credits</button>
-      </div>
-      <p class="controls">WASD 移動 · Shift 衝刺 · Ctrl 蹲下 · Space 跳躍／翻越 · 滑鼠瞄準 · 左鍵射擊 · 右鍵 ADS · R 換彈 · F 檢視 · V 近戰 · 1–5 換槍 · ESC 暫停</p>
-      <p id="release-version" class="release-version"></p>
+        <button id="menu-controls">操作指南</button>
+      </nav>
+      <p id="career-summary" class="field-help"></p>
+      </aside></div>
+      <footer class="menu-footer">
+      <p class="controls">WASD 移動 · Shift 衝刺 · Ctrl 蹲下 · Space 跳躍／翻越 · E 互動 · 滑鼠瞄準 · 左鍵射擊 · 右鍵 ADS · R 換彈 · F 檢視 · V 近戰 · 1–5 換槍 · ESC 暫停</p>
+      <p id="release-version" class="release-version"></p></footer>
     </main>
 
     <section id="hud" class="hidden" aria-label="戰鬥資訊">
@@ -174,13 +193,17 @@
 
     <section id="armory-panel" class="panel modal catalog hidden">
       <p class="eyebrow">WEAPON DATABASE</p><h2>Armory</h2>
+      <label for="armory-search">搜尋武器、類別或配件</label>
+      <input id="armory-search" type="search" placeholder="例如：RIFLE、SMG、Scope" autocomplete="off" />
+      <p id="armory-count" class="field-help" role="status"></p>
+      <p id="armory-empty" class="hidden">沒有符合的裝備，請調整或清除搜尋文字。</p>
       <div id="armory-list" class="catalog-grid"></div>
       <button class="close-menu-panel primary">返回</button>
     </section>
 
     <section id="challenges-panel" class="panel modal hidden">
       <p class="eyebrow">ACTIVE CONTRACTS</p><h2>Challenges</h2>
-      <p id="challenge-detail"></p><p>局內任務：Supply Drop、Elite Hunt、Hold Position、No Damage、Headshot、Weapon Challenge。</p>
+      <p id="challenge-detail"></p><button id="accept-daily" class="primary">套用每日挑戰</button><p>局內任務：Supply Drop、Elite Hunt、Hold Position、No Damage、Headshot、Weapon Challenge。</p>
       <button class="close-menu-panel primary">返回</button>
     </section>
 
@@ -192,7 +215,7 @@
 
     <section id="settings-panel" class="panel modal hidden">
       <p class="eyebrow">ACCESSIBILITY</p>
-      <h2>Settings</h2>
+      <h2>Settings</h2><p class="field-help">設定立即套用，並儲存在此瀏覽器。</p>
       <div class="settings-grid">
         <label>Graphics Profile<select id="setting-quality"><option value="auto">Auto</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="ultra">Ultra</option></select></label>
         <label>Active Profile<output id="quality-value">AUTO</output></label>
@@ -227,6 +250,7 @@
       <button id="close-controls" class="primary">返回</button>
     </section>
 
+    <p id="save-status" class="save-status hidden" role="status"></p>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
