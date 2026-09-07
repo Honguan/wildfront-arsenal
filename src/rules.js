@@ -2,6 +2,16 @@ import { CHAOS_MODIFIERS, DIFFICULTIES, ELITE_TRAITS, MAPS, PERKS, WEAPONS } fro
 
 export { ATTACHMENTS, BOSSES, CHAOS_MODIFIERS, CONTENT_MANIFEST, DIFFICULTIES, ELITE_TRAITS, ENEMY_TYPES, MAPS, MODES, PERKS, WEATHER, WEAPONS, WEAPON_QUALITIES } from './data/content-manifest.ts';
 
+const ROTATING_CHAOS_IDS = ['low-gravity', 'fast-player', 'fast-enemies', 'headshot-bonus', 'explosive-world', 'random-weapon', 'infinite-ammo', 'headshot-only'];
+export const ROTATING_CHAOS_MODIFIERS = ROTATING_CHAOS_IDS.map((id) => CHAOS_MODIFIERS.find((modifier) => modifier.id === id));
+
+export function arenaShiftPosition(index, shifted) {
+  const axis = index % 2 ? 1 : -1;
+  return shifted
+    ? { x: axis * 4, z: index < 2 ? -8 : 8, rotation: Math.PI / 2 }
+    : { x: axis * 9, z: index < 2 ? -4 : 4, rotation: 0 };
+}
+
 export function seedNumber(seed) {
   let hash = 2166136261;
   for (const char of String(seed)) {

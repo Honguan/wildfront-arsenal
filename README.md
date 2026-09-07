@@ -8,6 +8,7 @@ Browser-based roguelite FPS. No installation required.
 
 - 3 張可玩地圖、9 種天氣資料、5 種遊戲模式
 - 20 把武器、12 種敵人、Elite traits、5 種 Boss
+- 20 種武器模型、14 種可見附件、換彈／槍機／熱度動畫；武器庫分類配裝與本機配裝保存
 - 波次、16 種 Perk、14 種 World Modifier、Daily Challenge、Custom Game、Seed 分享
 - 本機成就與完整統計、可及性設定、自動效能降級
 
@@ -20,6 +21,7 @@ Browser-based roguelite FPS. No installation required.
 - R — Reload
 - F — Inspect weapon
 - V — Melee
+- 1–5 / Mouse wheel — Switch weapons
 - Shift — Sprint
 - Ctrl — Crouch
 - Space — Jump / Vault

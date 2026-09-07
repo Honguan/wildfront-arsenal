@@ -22,6 +22,8 @@ export interface WeaponDefinition {
   penetration?: number;
   shellReload?: boolean;
   armorPenetration?: number;
+  boltCycle?: number;
+  revolverReload?: boolean;
 }
 
 export interface MapDefinition {
@@ -88,7 +90,7 @@ export const WEAPON_QUALITIES = [
 
 export const WEAPONS = [
   { id: 'p9', name: 'P9', category: 'PISTOL', damage: 28, rate: 300, magazine: 12, reserve: 72, reload: 1.1, spread: 0.004, falloff: 42, recoil: 'sidearm', color: 0xd6c38a },
-  { id: 'heavy-revolver', name: 'Heavy Revolver', category: 'PISTOL', damage: 58, rate: 150, magazine: 6, reserve: 42, reload: 1.65, spread: 0.006, critical: 2.25, falloff: 50, movePenalty: .96, recoil: 'precision', armorPenetration: .5, color: 0xc68a57 },
+  { id: 'heavy-revolver', name: 'Heavy Revolver', category: 'PISTOL', damage: 58, rate: 150, magazine: 6, reserve: 42, reload: 1.65, spread: 0.006, critical: 2.25, falloff: 50, movePenalty: .96, recoil: 'precision', armorPenetration: .5, revolverReload: true, color: 0xc68a57 },
   { id: 'machine-pistol', name: 'Machine Pistol', category: 'PISTOL', damage: 15, rate: 900, magazine: 24, reserve: 144, reload: 1.45, spread: 0.021, falloff: 24, automatic: true, recoil: 'smg', color: 0x78b99a },
   { id: 'smg-9', name: 'SMG-9', category: 'SMG', damage: 16, rate: 750, magazine: 30, reserve: 150, reload: 1.55, spread: 0.016, falloff: 28, automatic: true, recoil: 'smg', color: 0x4dd2a5 },
   { id: 'vector-smg', name: 'Vector SMG', category: 'SMG', damage: 13, rate: 1050, magazine: 27, reserve: 162, reload: 1.7, spread: 0.019, falloff: 22, automatic: true, recoil: 'smg', color: 0x5fc9d1 },
@@ -96,7 +98,7 @@ export const WEAPONS = [
   { id: 'ar-4', name: 'AR-4', category: 'ASSAULT', damage: 24, rate: 600, magazine: 30, reserve: 120, reload: 1.8, spread: 0.009, falloff: 48, movePenalty: .96, automatic: true, recoil: 'rifle', color: 0xe5a43b },
   { id: 'burst-rifle', name: 'Burst Rifle', category: 'ASSAULT', damage: 30, rate: 420, magazine: 24, reserve: 120, reload: 1.9, spread: 0.006, falloff: 55, movePenalty: .94, automatic: true, recoil: 'rifle', color: 0xd08e52 },
   { id: 'pump-shotgun', name: 'Pump Shotgun', category: 'SHOTGUN', damage: 13, pellets: 8, rate: 75, magazine: 6, reserve: 42, reload: 0.48, spread: 0.065, falloff: 16, movePenalty: .91, shellReload: true, recoil: 'shotgun', color: 0xcb684e },
-  { id: 'bolt-sniper', name: 'Bolt Sniper', category: 'SNIPER', damage: 95, rate: 45, magazine: 5, reserve: 30, reload: 2.4, spread: 0.001, critical: 2.5, falloff: 90, movePenalty: .86, adsFov: 32, penetration: 2, recoil: 'precision', armorPenetration: .7, color: 0x8db8cf },
+  { id: 'bolt-sniper', name: 'Bolt Sniper', category: 'SNIPER', damage: 95, rate: 45, magazine: 5, reserve: 30, reload: 2.4, spread: 0.001, critical: 2.5, falloff: 90, movePenalty: .86, adsFov: 32, penetration: 2, recoil: 'precision', armorPenetration: .7, boltCycle: .85, color: 0x8db8cf },
   { id: 'auto-shotgun', name: 'Auto Shotgun', category: 'SHOTGUN', damage: 9, pellets: 7, rate: 240, magazine: 10, reserve: 50, reload: 2.3, spread: 0.075, falloff: 14, movePenalty: .86, automatic: true, recoil: 'shotgun', color: 0xc45f45 },
   { id: 'dmr', name: 'DMR', category: 'MARKSMAN', damage: 52, rate: 220, magazine: 15, reserve: 75, reload: 2, spread: 0.003, critical: 2.2, falloff: 72, movePenalty: .9, adsFov: 42, penetration: 2, recoil: 'precision', color: 0x9eae78 },
   { id: 'battle-rifle', name: 'Battle Rifle', category: 'MARKSMAN', damage: 44, rate: 340, magazine: 20, reserve: 100, reload: 2.15, spread: 0.006, falloff: 62, movePenalty: .88, automatic: true, recoil: 'rifle', color: 0x8f795e },

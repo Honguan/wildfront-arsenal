@@ -21,12 +21,14 @@ interface GameTestApi {
   inspectWeapon(): boolean;
   damageEnemy(id: number, amount?: number): boolean;
   getEnemies(): Array<{ id: number; health: number; bossType?: string; hasBossSignature: boolean; phase: number; armorBroken: boolean; telegraphing: boolean; heardNoise: string | null; squadId: number; squadRole: string; squadCommand: string | null; position: number[] }>;
-  getGameState(): { phase: string; score: number; modifier: string | null; recoilShot: number; effects: number; effectCapacity: number; environmentKills: number; mission: null | { id: string } };
+  getGameState(): { phase: string; score: number; modifier: string | null; recoilShot: number; effects: number; effectCapacity: number; environmentKills: number; mission: null | { id: string }; arenaShifted: boolean; boltCycling: boolean };
   getLootBoxes(): Array<{ key: string; opened: boolean; quality: string; position: number[] }>;
   getInteractions(): Array<{ key: string; label: string; used: boolean; position: number[] }>;
   getAnimals(): Array<{ type: string; state: string; position: number[] }>;
   getAttachments(): string[];
-  getRenderState(): { background: string; toneMapping: number; exposure: number; pixelRatio: number; sun: number };
+  grantAttachment(id: string): boolean;
+  triggerArenaShift(): boolean;
+  getRenderState(): { background: string; toneMapping: number; exposure: number; pixelRatio: number; sun: number; flashlight: number };
   readCenterPixel(): number[];
   getPlayer(): PlayerState;
   reload(): void;
@@ -50,7 +52,7 @@ interface DiagnosticApi {
   getState(): {
     complete: boolean;
     mode: string;
-    report: null | { averageFps: number; enemies: number; onePercentLowFrameTimeMs: number; particles: number; samples: number };
+    report: null | { averageFps: number; drawCalls: number; enemies: number; onePercentLowFrameTimeMs: number; particles: number; potentialStuckAgents: number; samples: number; triangles: number };
     target: number;
   };
 }
@@ -61,6 +63,65 @@ declare global {
     __GAME_DIAGNOSTICS__: DiagnosticApi;
   }
 }
+
+test('reload fills the effective extended magazine capacity', async ({ page }) => {
+  await page.goto('./?test=1');
+  await expect(page.locator('#loading')).toBeHidden({ timeout: 30_000 });
+  await page.locator('#modifier-policy').selectOption('normal');
+  await page.getByRole('button', { name: '開始行動' }).click();
+
+  expect(await page.evaluate(() => {
+    const api = window.__GAME_TEST__;
+    api.setWeapon(6);
+    const granted = api.grantAttachment('extended-mag');
+    api.fire();
+    api.reload();
+    return granted;
+  })).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__GAME_TEST__.getPlayer().ammo), { timeout: 5_000 }).toBe(41);
+});
+
+test('explosive chains never remove enemies that are outside the blast', async ({ page }) => {
+  await page.goto('./?test=1');
+  await expect(page.locator('#loading')).toBeHidden({ timeout: 30_000 });
+  await page.locator('#modifier-policy').selectOption('normal');
+  await page.getByRole('button', { name: '開始行動' }).click();
+
+  const result = await page.evaluate(() => {
+    const api = window.__GAME_TEST__;
+    const enemies = api.getEnemies();
+    api.applyPerk('explosive-kill');
+    api.setEnemyPosition(enemies[0].id, -10, -10);
+    api.setEnemyPosition(enemies[1].id, -9.5, -10);
+    api.setEnemyPosition(enemies[2].id, -10, -9.5);
+    enemies.slice(3).forEach((enemy, index) => api.setEnemyPosition(enemy.id, 20 + index * 2, 20));
+    api.damageEnemy(enemies[1].id, 79);
+    api.damageEnemy(enemies[2].id, 79);
+    api.killEnemy(enemies[0].id);
+    return { expected: enemies.slice(3).map(({ id }) => id), remaining: api.getEnemies().map(({ id }) => id) };
+  });
+  expect(result.remaining).toEqual(result.expected);
+});
+
+test('bolt, flashlight, and arena shift mechanics are active gameplay states', async ({ page }) => {
+  await page.goto('./?test=1');
+  await expect(page.locator('#loading')).toBeHidden({ timeout: 30_000 });
+  await page.locator('#modifier-policy').selectOption('normal');
+  await page.getByRole('button', { name: '開始行動' }).click();
+
+  const initial = await page.evaluate(() => {
+    const api = window.__GAME_TEST__;
+    api.setWeapon(9);
+    api.fire();
+    api.grantAttachment('flashlight');
+    api.setTime('night');
+    api.setMap('prism');
+    return { bolt: api.getGameState().boltCycling, shiftQueued: api.triggerArenaShift() };
+  });
+  expect(initial).toEqual({ bolt: true, shiftQueued: true });
+  await expect.poll(() => page.evaluate(() => window.__GAME_TEST__.getRenderState().flashlight)).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => window.__GAME_TEST__.getGameState().arenaShifted)).toBe(true);
+});
 
 test('production build supports the core playable flow', async ({ page }) => {
   const runtimeErrors: string[] = [];
@@ -271,6 +332,7 @@ test('core loading failure offers recovery actions', async ({ page }) => {
 });
 
 test('diagnostic routes create their specified real enemy loads', async ({ page }) => {
+  test.setTimeout(60_000);
   await page.goto('./?benchmark=1');
   await expect(page.locator('#loading')).toBeHidden({ timeout: 30_000 });
   expect(await page.evaluate(() => ({ diagnostic: window.__GAME_DIAGNOSTICS__.getState(), enemies: window.__GAME_TEST__.getEnemies().length }))).toMatchObject({
@@ -281,8 +343,10 @@ test('diagnostic routes create their specified real enemy loads', async ({ page 
   const report = await page.evaluate(() => window.__GAME_DIAGNOSTICS__.getState().report);
   expect(report).toMatchObject({ enemies: 25, particles: 120 });
   expect(report?.averageFps).toBeGreaterThan(0);
+  expect(report?.drawCalls).toBeLessThanOrEqual(110);
   expect(report?.samples).toBeGreaterThan(0);
   expect(report?.onePercentLowFrameTimeMs).toBeGreaterThan(0);
+  expect(report?.triangles).toBeLessThanOrEqual(5_200);
 
   await page.goto('./?aiStress=1');
   await expect(page.locator('#loading')).toBeHidden({ timeout: 30_000 });
@@ -291,4 +355,9 @@ test('diagnostic routes create their specified real enemy loads', async ({ page 
   expect(stressState.diagnostic.target).toBeGreaterThanOrEqual(10);
   expect(stressState.diagnostic.target).toBeLessThanOrEqual(50);
   expect(stressState.enemies).toBe(stressState.diagnostic.target);
+  await expect.poll(() => page.evaluate(() => window.__GAME_DIAGNOSTICS__.getState().complete), { timeout: 30_000 }).toBe(true);
+  const stressReport = await page.evaluate(() => window.__GAME_DIAGNOSTICS__.getState().report);
+  expect(stressReport?.drawCalls).toBeLessThanOrEqual(200);
+  expect(stressReport?.potentialStuckAgents).toBe(0);
+  expect(stressReport?.triangles).toBeLessThanOrEqual(9_000);
 });

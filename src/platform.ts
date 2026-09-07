@@ -3,11 +3,11 @@ import type { WebGLRenderer } from 'three';
 export type GraphicsProfile = 'low' | 'medium' | 'high' | 'ultra';
 
 export const GRAPHICS_PROFILES = {
-  low: { drawDistance: 70, particles: 120, resolutionScale: .75, shadows: false },
-  medium: { drawDistance: 100, particles: 220, resolutionScale: 1, shadows: true },
-  high: { drawDistance: 120, particles: 300, resolutionScale: 1.25, shadows: true },
-  ultra: { drawDistance: 140, particles: 300, resolutionScale: 1.5, shadows: true },
-} satisfies Record<GraphicsProfile, { drawDistance: number; particles: number; resolutionScale: number; shadows: boolean }>;
+  low: { drawDistance: 70, enemyLodDistance: 16, particles: 120, resolutionScale: .75, shadows: false },
+  medium: { drawDistance: 100, enemyLodDistance: 24, particles: 220, resolutionScale: 1, shadows: true },
+  high: { drawDistance: 120, enemyLodDistance: 30, particles: 300, resolutionScale: 1.25, shadows: true },
+  ultra: { drawDistance: 140, enemyLodDistance: 36, particles: 300, resolutionScale: 1.5, shadows: true },
+} satisfies Record<GraphicsProfile, { drawDistance: number; enemyLodDistance: number; particles: number; resolutionScale: number; shadows: boolean }>;
 
 export interface HardwareCapabilities {
   deviceMemory: number;
