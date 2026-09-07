@@ -17,6 +17,7 @@ import { scoreKill } from './combat/Scoring.ts';
 import { createMission, progressMission } from './missions/Missions.ts';
 import { applyArmor } from './combat/Armor.ts';
 import { createVisualIdentity } from './enemies/Visuals.ts';
+import { createWeaponModel } from './weapons/Models.ts';
 import { APP_VERSION, BUILD_SHA } from './version.ts';
 
 const $ = (selector) => document.querySelector(selector);
@@ -118,6 +119,7 @@ function freshRunStats() {
 let storage;
 try { storage = localStorage; } catch { /* Browser storage may be disabled. */ }
 const savedGame = loadSave(storage);
+let preferredLoadout = savedGame.loadout;
 let progress = savedGame.progress;
 let pendingDaily = null;
 
@@ -609,19 +611,11 @@ function buildMap(run) {
 buildMap(state.run);
 
 const gun = new THREE.Group();
-const gunBody = new THREE.Mesh(
-  new THREE.BoxGeometry(.16, .17, .7),
-  new THREE.MeshStandardMaterial({ color: WEAPONS[0].color, roughness: .4, metalness: .7 })
-);
-gunBody.position.z = -.2;
-gun.add(gunBody);
-const barrel = new THREE.Mesh(
-  new THREE.CylinderGeometry(.025, .035, .5, 8),
-  new THREE.MeshStandardMaterial({ color: 0x17201c, metalness: .85, roughness: .28 })
-);
-barrel.rotation.x = Math.PI / 2;
-barrel.position.set(0, .015, -.7);
-gun.add(barrel);
+const weaponModels = new Map();
+let weaponModel;
+const tracerOrigin = new THREE.Vector3();
+const casingOrigin = new THREE.Vector3();
+const casingDirection = new THREE.Vector3();
 gun.position.set(.34, -.28, -.62);
 camera.add(gun);
 const gloveMaterial = new THREE.MeshStandardMaterial({ color: 0x27312d, roughness: .9 });
@@ -650,15 +644,26 @@ for (const x of [-.16, .16]) {
 scene.add(playerShadowRig);
 
 const muzzle = new THREE.PointLight(0xffb347, 0, 3);
-muzzle.position.set(0, 0, -1);
-camera.add(muzzle);
+muzzle.position.set(0, 0, 0);
 const flashlight = new THREE.SpotLight(0xe8f4ff, 0, 34, Math.PI / 7, .45, 1.2);
 flashlight.position.set(.18, -.08, -.35);
 flashlight.target.position.set(0, 0, -10);
 camera.add(flashlight, flashlight.target);
 
 function syncFlashlight() {
+  weaponModel?.setAttachments(state.attachments);
   flashlight.intensity = state.attachments.includes('flashlight') ? (state.run.time === 'night' ? 14 : 7) : 0;
+}
+
+function syncWeaponModel() {
+  const weapon = WEAPONS[state.loadout[state.weaponIndex]];
+  if (!weaponModels.has(weapon.id)) weaponModels.set(weapon.id, createWeaponModel(weapon));
+  weaponModel?.group.removeFromParent();
+  weaponModel = weaponModels.get(weapon.id);
+  gun.add(weaponModel.group);
+  weaponModel.muzzle.add(muzzle);
+  weaponModel.setAttachments(state.attachments);
+  weaponModel.update({ reload: 0, bolt: 0, heat: 0, time: performance.now() / 1000 });
 }
 
 function currentWeapon() {
@@ -705,7 +710,7 @@ function openNearbyLoot(selectedBox = null) {
     state.loadout[state.weaponIndex] = weaponIndex;
     state.weapons[state.weaponIndex] = { ammo: WEAPONS[weaponIndex].magazine, reserve: WEAPONS[weaponIndex].reserve, heat: 0 };
     state.weaponQualities[state.weaponIndex] = 0;
-    switchWeapon(state.weaponIndex);
+    switchWeapon(state.weaponIndex, true);
     announce(`MILITARY CACHE · ${WEAPONS[weaponIndex].name}`, 2);
     return true;
   }
@@ -823,7 +828,7 @@ function closePanel() {
 }
 
 function persistProgress() {
-  const saved = saveGame(storage, progress, state.settings);
+  const saved = saveGame(storage, progress, state.settings, preferredLoadout);
   $('#save-status').classList.toggle('hidden', saved);
   $('#save-status').textContent = saved ? '' : '目前無法儲存進度與設定；關閉頁面後，本次變更可能遺失。';
 }
@@ -959,6 +964,7 @@ function spawnEnemy(type, index, { boss = false, bossType = 'juggernaut', forceE
   group.add(helmet, chestPlate, shoulder);
   accessories.push(helmet, chestPlate, shoulder);
   const lowMesh = new THREE.Mesh(new THREE.CapsuleGeometry(.46, 1.05, 2, 5), new THREE.MeshLambertMaterial({ color: material.color }));
+  lowMesh.material.emissiveIntensity = material.emissiveIntensity;
   lowMesh.position.y = 1;
   lowMesh.visible = false;
   group.add(lowMesh);
@@ -986,12 +992,12 @@ function spawnEnemy(type, index, { boss = false, bossType = 'juggernaut', forceE
     group.add(weakPoint);
     targets.push(weakPoint);
     const signatureGeometry = {
-      juggernaut: new THREE.BoxGeometry(1.35, .35, .55),
-      'hunter-alpha': new THREE.ConeGeometry(.55, 1.4, 5),
-      'drone-carrier': new THREE.TorusGeometry(.75, .12, 6, 18),
-      'siege-walker': new THREE.CylinderGeometry(.15, .22, 1.8, 8),
-      phantom: new THREE.OctahedronGeometry(.62)
-    }[bossConfig.id];
+      juggernaut: () => new THREE.BoxGeometry(1.35, .35, .55),
+      'hunter-alpha': () => new THREE.ConeGeometry(.55, 1.4, 5),
+      'drone-carrier': () => new THREE.TorusGeometry(.75, .12, 6, 18),
+      'siege-walker': () => new THREE.CylinderGeometry(.15, .22, 1.8, 8),
+      phantom: () => new THREE.OctahedronGeometry(.62)
+    }[bossConfig.id]();
     bossSignature = new THREE.Mesh(signatureGeometry, new THREE.MeshStandardMaterial({ color: 0x34242a, emissive: 0xff4a25, emissiveIntensity: .8, metalness: .65 }));
     bossSignature.position.set(0, bossConfig.id === 'drone-carrier' ? 2.3 : 1.3, bossConfig.id === 'siege-walker' ? -.9 : 0);
     if (bossConfig.id === 'siege-walker') bossSignature.rotation.x = Math.PI / 2;
@@ -1009,8 +1015,8 @@ function spawnEnemy(type, index, { boss = false, bossType = 'juggernaut', forceE
     group.add(rifle);
     accessories.push(rifle);
   }
-  if (type === 'heavy') group.scale.x = 1.28;
-  if (type === 'sniper') group.scale.x = .82;
+  if (type === 'heavy') group.scale.x *= 1.28;
+  if (type === 'sniper') group.scale.x *= .82;
   if (config.medic) {
     const backpack = new THREE.Mesh(new THREE.BoxGeometry(.65, .72, .3), new THREE.MeshStandardMaterial({ color: 0x315f4c, emissive: 0x39ff9a, emissiveIntensity: .8 }));
     backpack.position.set(0, 1.15, .38);
@@ -1251,13 +1257,14 @@ function startGame() {
   if (state.chaosModifier === 'fog-world') scene.fog.density *= 2.2;
   camera.position.set(0, 1.7, 6);
   camera.rotation.set(0, 0, 0);
-  switchWeapon(state.weaponIndex);
+  switchWeapon(state.weaponIndex, true);
   spawnWave();
   setPhase('playing');
   if (!testMode) controls.lock();
 }
 
-function switchWeapon(index) {
+function switchWeapon(index, refresh = false) {
+  if (index === state.weaponIndex && !refresh) return;
   if (state.loadout[index] === undefined) return;
   if (state.chaosModifier === 'shotgun-only' && WEAPONS[state.loadout[index]].category !== 'SHOTGUN') return;
   state.weaponIndex = index;
@@ -1265,9 +1272,9 @@ function switchWeapon(index) {
   state.boltTimer = 0;
   state.recoilShot = 0;
   state.equipTimer = .28;
-  const weapon = currentWeapon();
-  gunBody.material.color.setHex(weapon.color);
-  gunBody.scale.set(weapon.category === 'PISTOL' ? .8 : 1, weapon.category === 'SHOTGUN' ? 1.15 : 1, weapon.category === 'SNIPER' ? 1.45 : 1);
+  muzzle.intensity = 0;
+  state.muzzleTimer = 0;
+  syncWeaponModel();
   playEquip();
   updateHud();
 }
@@ -1456,8 +1463,12 @@ function fire(force = false) {
   muzzle.intensity = state.settings.reduceFlash ? 0 : weapon.category === 'SHOTGUN' ? 12 : 6;
   const pellets = weapon.pellets ?? 1;
   let shotHit = false;
-  const tracerStart = muzzle.getWorldPosition(new THREE.Vector3());
-  if (weapon.category !== 'EXPERIMENTAL') shotEffects.spawnCasing(tracerStart);
+  const tracerStart = muzzle.getWorldPosition(tracerOrigin);
+  if (weapon.category !== 'EXPERIMENTAL') {
+    gun.localToWorld(casingOrigin.set(.1, .025, -.12));
+    casingDirection.set(1, 0, 0).transformDirection(gun.matrixWorld);
+    shotEffects.spawnCasing(casingOrigin, casingDirection);
+  }
   const moving = keys.has('KeyW') || keys.has('KeyA') || keys.has('KeyS') || keys.has('KeyD') || !state.grounded;
 
   for (let pellet = 0; pellet < pellets; pellet += 1) {
@@ -1808,6 +1819,8 @@ function updateEnemies(delta) {
     enemy.detailMeshes.forEach((mesh) => { mesh.visible = !lowDetail; });
     enemy.accessories.forEach((mesh) => { mesh.visible = !lowDetail && lodDistance < 18; });
     enemy.lowMesh.visible = lowDetail;
+    if (enemy.bossSignature) enemy.bossSignature.visible = true;
+    if (enemy.weakPoint) enemy.weakPoint.visible = true;
     enemy.animationTime += delta * (2 + Math.abs(movement) * config.speed * 2.5);
     enemy.fireTimer = Math.max(0, enemy.fireTimer - delta);
     const stride = Math.sin(enemy.animationTime) * Math.min(.65, Math.abs(movement) * .65);
@@ -1822,10 +1835,12 @@ function updateEnemies(delta) {
     enemy.hitTimer -= delta;
     if (enemy.traits.includes('regeneration')) enemy.health = Math.min(enemy.maxHealth, enemy.health + enemy.maxHealth * .008 * delta);
     if (enemy.hitTimer <= 0) enemy.group.children[0].material.emissive.setHex(enemy.emissive);
+    enemy.lowMesh.material.emissive.copy(enemy.group.children[0].material.emissive);
 
     if (enemy.pendingAttack) {
       enemy.telegraphTimer -= delta;
       enemy.group.children[0].material.emissive.setHex(enemy.telegraphTimer % .2 < .1 ? 0xff6a23 : enemy.emissive);
+      enemy.lowMesh.material.emissive.copy(enemy.group.children[0].material.emissive);
       if (enemy.telegraphTimer <= 0) {
         if (state.rng() < enemy.pendingAttack.accuracy) {
           if (enemy.pendingAttack.objective) damageObjective(enemy.pendingAttack.damage);
@@ -2028,14 +2043,15 @@ function updatePlayer(delta) {
   const landingKick = state.landingTimer ? Math.sin(state.landingTimer / .18 * Math.PI) * .055 : 0;
   const targetX = state.ads ? .015 : .34;
   const reloadMotion = state.reloading ? Math.sin((1 - state.reloadTimer / Math.max(.01, state.reloadDuration)) * Math.PI) : 0;
-  const boltMotion = state.boltTimer > 0 ? Math.sin((1 - state.boltTimer / Math.max(.01, currentWeapon().boltCycle)) * Math.PI) : 0;
+  const boltMotion = state.boltTimer > 0 ? Math.sin((1 - state.boltTimer / Math.max(.01, weapon.boltCycle)) * Math.PI) : 0;
   const inspectMotion = state.inspectTimer > 0 ? Math.sin((1.2 - state.inspectTimer) / 1.2 * Math.PI) : 0;
   const meleeMotion = state.meleeTimer > 0 ? Math.sin((.35 - state.meleeTimer) / .35 * Math.PI) : 0;
   const idleMotion = state.idleTimer === 0 ? Math.sin(performance.now() * .0012) * .08 : 0;
   gun.position.x = THREE.MathUtils.lerp(gun.position.x, targetX, Math.min(1, delta * 12));
   gun.position.y = THREE.MathUtils.lerp(gun.position.y, -.28 + bob - landingKick - state.weaponKick - state.equipTimer * .7 - (sprinting && moving ? .12 : 0), Math.min(1, delta * 22));
-  gun.rotation.z = THREE.MathUtils.lerp(gun.rotation.z, reloadMotion * (currentWeapon().ammo ? .55 : -.72) + boltMotion * .22 + inspectMotion * 1.15 + idleMotion + (sprinting && moving ? -.32 : 0), Math.min(1, delta * 14));
+  gun.rotation.z = THREE.MathUtils.lerp(gun.rotation.z, reloadMotion * (weapon.ammo ? .55 : -.72) + boltMotion * .22 + inspectMotion * 1.15 + idleMotion + (sprinting && moving ? -.32 : 0), Math.min(1, delta * 14));
   gun.rotation.x = THREE.MathUtils.lerp(gun.rotation.x, reloadMotion * .35 - boltMotion * .18 + inspectMotion * .25 - meleeMotion * .75 + (sprinting && moving ? -.22 : 0), Math.min(1, delta * 14));
+  weaponModel.update({ reload: reloadMotion, bolt: Math.max(boltMotion, state.muzzleTimer > 0 ? 1 : 0), heat: weapon.overheat ? weapon.heat / 100 : state.muzzleTimer > 0 ? .3 : 0, time: performance.now() / 1000 });
   state.weaponKick = THREE.MathUtils.lerp(state.weaponKick, 0, Math.min(1, delta * 16));
   const profile = RECOIL_PROFILES[weapon.recoil];
   const pitchRecovery = Math.min(state.recoilPitch, profile.recovery * delta);
@@ -2578,8 +2594,15 @@ document.addEventListener('keydown', (event) => {
   if (event.code === 'KeyE' && !event.repeat) interactNearby();
   if (event.code === 'KeyF' && !event.repeat) inspectWeapon();
   if (event.code === 'KeyV' && !event.repeat) melee();
-  if (event.code.startsWith('Digit')) switchWeapon(Number(event.code.slice(-1)) - 1);
+  if (event.code.startsWith('Digit') && !event.repeat) switchWeapon(Number(event.code.slice(-1)) - 1);
 });
+document.addEventListener('wheel', (event) => {
+  if (state.phase !== 'playing' || !event.deltaY || event.ctrlKey) return;
+  event.preventDefault();
+  const slots = state.loadout.map((weapon, slot) => ({ weapon, slot })).filter(({ weapon }) => state.chaosModifier !== 'shotgun-only' || WEAPONS[weapon].category === 'SHOTGUN');
+  const next = (slots.findIndex(({ slot }) => slot === state.weaponIndex) + Math.sign(event.deltaY) + slots.length) % slots.length;
+  if (slots[next]) switchWeapon(slots[next].slot);
+}, { passive: false });
 document.addEventListener('keyup', (event) => keys.delete(event.code));
 document.addEventListener('mousedown', (event) => {
   if (state.phase !== 'playing' || !controls.isLocked && !testMode) return;
@@ -2626,28 +2649,53 @@ for (let slot = 0; slot < 5; slot += 1) {
   const label = document.createElement('label');
   label.textContent = `Slot ${slot + 1} · 按鍵 ${slot + 1}`;
   const select = document.createElement('select');
-  for (const [index, weapon] of WEAPONS.entries()) select.add(new Option(`${weapon.category} · ${weapon.name}`, String(index), false, index === slot));
+  for (const [index, weapon] of WEAPONS.entries()) select.add(new Option(`${weapon.category} · ${weapon.name}`, String(index), false, weapon.id === preferredLoadout[slot]));
+  select.addEventListener('change', saveLoadout);
   label.append(select);
   $('#loadout-slots').append(label);
 }
-for (const weapon of WEAPONS) {
+function saveLoadout() {
+  preferredLoadout = [...document.querySelectorAll('#loadout-slots select')].map((select) => WEAPONS[Number(select.value)].id);
+  persistProgress();
+  updateLoadoutSummary();
+}
+
+function updateLoadoutSummary() {
+  $('#loadout-summary').textContent = preferredLoadout.map((id, slot) => `${slot + 1} · ${WEAPONS.find((weapon) => weapon.id === id).name}`).join(' / ');
+}
+updateLoadoutSummary();
+
+for (const category of [...new Set(WEAPONS.map(({ category }) => category)), 'ATTACHMENT']) $('#armory-category').add(new Option(category, category));
+for (const [index, weapon] of WEAPONS.entries()) {
   const card = document.createElement('article');
+  card.dataset.category = weapon.category;
   const icon = document.createElement('span');
   const title = document.createElement('strong');
   const detail = document.createElement('small');
   icon.className = 'weapon-icon';
   icon.style.setProperty('--weapon-color', `#${weapon.color.toString(16).padStart(6, '0')}`);
   title.textContent = weapon.name;
-  detail.textContent = `${weapon.category} · DMG ${weapon.damage} · RPM ${weapon.rate} · MAG ${weapon.magazine}`;
-  card.append(icon, title, detail);
+  detail.textContent = `${weapon.category} · DMG ${weapon.damage}${weapon.pellets ? ` × ${weapon.pellets}` : ''} · RPM ${weapon.rate} · ${weapon.overheat ? 'HEAT' : `MAG ${weapon.magazine}`} · 射程 ${weapon.falloff}m`;
+  const equip = document.createElement('button');
+  equip.textContent = '裝備至所選欄位';
+  equip.setAttribute('aria-label', `裝備 ${weapon.name}`);
+  equip.dataset.weapon = weapon.id;
+  equip.addEventListener('click', () => {
+    const slot = Number($('#armory-slot').value);
+    document.querySelectorAll('#loadout-slots select')[slot].value = String(index);
+    saveLoadout();
+    $('#armory-status').textContent = `${weapon.name} 已配置至欄位 ${slot + 1}，下一場一般行動生效。`;
+  });
+  card.append(icon, title, detail, equip);
   $('#armory-list').append(card);
 }
 for (const attachment of ATTACHMENTS) {
   const card = document.createElement('article');
+  card.dataset.category = 'ATTACHMENT';
   const title = document.createElement('strong');
   const detail = document.createElement('small');
   title.textContent = attachment.name;
-  detail.textContent = `ATTACHMENT · ${attachment.slot.toUpperCase()}`;
+  detail.textContent = `ATTACHMENT · ${attachment.slot.toUpperCase()} · 局內補給取得`;
   card.append(title, detail);
   $('#armory-list').append(card);
 }
@@ -2731,12 +2779,14 @@ for (const panel of document.querySelectorAll('.modal')) {
 function filterArmory() {
   const term = $('#armory-search').value.trim().toLocaleLowerCase();
   const cards = [...$('#armory-list').children];
-  for (const card of cards) card.classList.toggle('hidden', !card.textContent.toLocaleLowerCase().includes(term));
+  const category = $('#armory-category').value;
+  for (const card of cards) card.classList.toggle('hidden', !card.textContent.toLocaleLowerCase().includes(term) || category !== 'all' && card.dataset.category !== category);
   const count = cards.filter((card) => !card.classList.contains('hidden')).length;
   $('#armory-count').textContent = `${count} / ${cards.length} 項裝備`;
   $('#armory-empty').classList.toggle('hidden', count !== 0);
 }
 $('#armory-search').addEventListener('input', filterArmory);
+$('#armory-category').addEventListener('change', filterArmory);
 filterArmory();
 
 if (testMode) {
@@ -2777,7 +2827,7 @@ if (testMode) {
       if (!WEAPONS[index]) return false;
       state.loadout[state.weaponIndex] = index;
       state.weapons[state.weaponIndex] = { ammo: WEAPONS[index].magazine, reserve: WEAPONS[index].reserve, heat: 0 };
-      switchWeapon(state.weaponIndex);
+      switchWeapon(state.weaponIndex, true);
       return true;
     },
     unlockWeapon(value) { return this.setWeapon(value); },
@@ -2821,6 +2871,17 @@ if (testMode) {
       return true;
     },
     applyPerk,
+    getWeaponModel: () => ({
+      id: weaponModel.group.name,
+      uuid: weaponModel.group.uuid,
+      cacheSize: weaponModels.size,
+      magazineY: weaponModel.magazine.position.y,
+      boltZ: weaponModel.bolt.position.z,
+      muzzle: weaponModel.muzzle.getWorldPosition(new THREE.Vector3()).toArray(),
+      attachments: ATTACHMENTS.filter(({ id }) => weaponModel.group.getObjectByName(id)?.visible).map(({ id }) => id),
+      tracerStarts: shotEffects.group.children.filter((object) => object.isLine && object.visible).map((object) => [...object.geometry.attributes.position.array.slice(0, 3)]),
+      geometries: renderer.info.memory.geometries,
+    }),
     getRenderState: () => ({ background: scene.background.getHexString(), toneMapping: renderer.toneMapping, exposure: renderer.toneMappingExposure, pixelRatio: renderer.getPixelRatio(), sun: sun.intensity, flashlight: flashlight.intensity }),
     readCenterPixel() {
       renderer.render(scene, camera);
@@ -2844,7 +2905,7 @@ if (testMode) {
       camera.position.set(THREE.MathUtils.clamp(Number(x) || 0, -37, 37), STAND_HEIGHT, THREE.MathUtils.clamp(Number(z) || 0, -37, 37));
       camera.rotation.set(0, Number(yaw) || 0, 0);
     },
-    getEnemies: () => enemies.map(({ id, type, health, traits, bossType, bossSignature, phase, armorBroken, telegraphTimer, combatState, personality, coverPoint, memoryTimer, seesPlayer, heardNoise, squadId, squadRole, squadCommand, lastKnownPlayerPosition, group }) => ({ id, type, health, traits: [...traits], bossType, hasBossSignature: Boolean(bossSignature), phase, armorBroken, telegraphing: telegraphTimer > 0, combatState, personality, coverPoint: coverPoint?.id ?? null, memoryTimer, seesPlayer, heardNoise, squadId, squadRole, squadCommand, lastKnownPlayerPosition: lastKnownPlayerPosition.toArray(), position: group.position.toArray() })),
+    getEnemies: () => enemies.map(({ id, type, health, traits, bossType, bossSignature, weakPoint, lowMesh, phase, armorBroken, telegraphTimer, combatState, personality, coverPoint, memoryTimer, seesPlayer, heardNoise, squadId, squadRole, squadCommand, lastKnownPlayerPosition, group }) => ({ id, type, health, traits: [...traits], bossType, hasBossSignature: Boolean(bossSignature), signatureVisible: Boolean(bossSignature?.visible), weakPointVisible: Boolean(weakPoint?.visible), lowDetail: lowMesh.visible, phase, armorBroken, telegraphing: telegraphTimer > 0, combatState, personality, coverPoint: coverPoint?.id ?? null, memoryTimer, seesPlayer, heardNoise, squadId, squadRole, squadCommand, lastKnownPlayerPosition: lastKnownPlayerPosition.toArray(), position: group.position.toArray() })),
     damageEnemy(id, amount = 1) {
       const enemy = enemies.find((candidate) => candidate.id === Number(id));
       if (!enemy) return false;
@@ -2866,6 +2927,7 @@ if (testMode) {
 
 if (testMode) state.settings = { ...state.settings, quality: 'low', shadows: false, postProcessing: false };
 resetWeapons();
+syncWeaponModel();
 $('#setting-quality').querySelector('[value="ultra"]').disabled = capabilities.profile !== 'high' && !capabilities.webgpu;
 $('#setting-fov').value = state.settings.fov;
 $('#setting-sensitivity').value = state.settings.sensitivity;

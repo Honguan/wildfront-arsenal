@@ -47,6 +47,7 @@ export function createShotEffects(tracerCapacity = 24, impactCapacity = 32, casi
       position.setXYZ(0, start.x, start.y, start.z);
       position.setXYZ(1, end.x, end.y, end.z);
       position.needsUpdate = true;
+      effect.object.geometry.computeBoundingSphere();
       effect.object.material.color.setHex(color);
       effect.object.material.opacity = .85;
       effect.object.visible = true;
@@ -60,12 +61,16 @@ export function createShotEffects(tracerCapacity = 24, impactCapacity = 32, casi
       effect.object.visible = true;
       effect.life = .13;
     },
-    spawnCasing(origin: THREE.Vector3) {
+    spawnCasing(origin: THREE.Vector3, direction?: THREE.Vector3) {
       const phase = casingIndex++;
       const effect = casings[phase % casings.length];
       effect.object.position.copy(origin);
       effect.object.rotation.set(phase, phase * .7, phase * .3);
-      effect.velocity.set(1.2 + Math.sin(phase) * .35, 1.45 + Math.cos(phase) * .25, Math.sin(phase * 2) * .35);
+      const speed = 1.2 + Math.sin(phase) * .35;
+      if (direction) effect.velocity.copy(direction).normalize().multiplyScalar(speed);
+      else effect.velocity.set(speed, 0, 0);
+      effect.velocity.y += 1.45 + Math.cos(phase) * .25;
+      effect.velocity.z += Math.sin(phase * 2) * .35;
       effect.object.visible = true;
       effect.life = .7;
     },

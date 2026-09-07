@@ -120,6 +120,21 @@ test('failed legacy migration preserves readable progress and the original save'
   assert.equal(values.has(SAVE_KEY), false);
 });
 
+test('saved loadouts retain stable weapon ids and repair invalid slots independently', () => {
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
+  };
+  const defaults = WEAPONS.slice(0, 5).map(({ id }) => id);
+  assert.deepEqual(loadSave(storage).loadout, defaults);
+  saveGame(storage, {}, {}, ['railgun', 'invalid', 2, 'lmg', 'railgun', 'dmr']);
+  assert.deepEqual(loadSave(storage).loadout, ['railgun', defaults[1], defaults[2], 'lmg', 'railgun']);
+  saveGame(storage, {}, {}, { 0: 'lmg' });
+  assert.deepEqual(loadSave(storage).loadout, defaults);
+});
+
 test('run results accumulate into persistent statistics and achievements', () => {
   assert.equal(createProgress({ kills: 'corrupt' }).kills, 0);
   const progress = recordRun(createProgress(), {

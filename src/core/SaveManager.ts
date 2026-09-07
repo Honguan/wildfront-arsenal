@@ -1,4 +1,5 @@
 import { createProgress, summarizeProgress } from '../progress.js';
+import { WEAPONS } from '../data/content-manifest.ts';
 
 export const SAVE_KEY = 'wildfront-save';
 export const SAVE_VERSION = 1;
@@ -37,6 +38,7 @@ interface StorageLike {
 interface SaveData {
   version: typeof SAVE_VERSION;
   settings: GameSettings;
+  loadout: string[];
   progress: ReturnType<typeof createProgress>;
   statistics: ReturnType<typeof summarizeProgress>;
 }
@@ -112,6 +114,10 @@ export function createSave(value: unknown = {}): SaveData {
   return {
     version: SAVE_VERSION,
     settings: normalizeSettings(source.version === SAVE_VERSION ? source.settings : {}),
+    loadout: WEAPONS.slice(0, 5).map((fallback, slot) => {
+      const id = Array.isArray(source.loadout) ? source.loadout[slot] : null;
+      return WEAPONS.some((weapon) => weapon.id === id) ? id : fallback.id;
+    }),
     progress,
     statistics: summarizeProgress(progress),
   };
@@ -136,9 +142,9 @@ export function loadSave(storage: StorageLike): SaveData {
   }
 }
 
-export function saveGame(storage: StorageLike, progress: unknown, settings: unknown): boolean {
+export function saveGame(storage: StorageLike, progress: unknown, settings: unknown, loadout: unknown = []): boolean {
   try {
-    storage.setItem(SAVE_KEY, JSON.stringify(createSave({ version: SAVE_VERSION, progress, settings })));
+    storage.setItem(SAVE_KEY, JSON.stringify(createSave({ version: SAVE_VERSION, progress, settings, loadout })));
     return true;
   } catch {
     return false;

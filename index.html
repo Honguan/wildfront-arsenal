@@ -108,7 +108,7 @@
       <p id="career-summary" class="field-help"></p>
       </aside></div>
       <footer class="menu-footer">
-      <p class="controls">WASD 移動 · Shift 衝刺 · Ctrl 蹲下 · Space 跳躍／翻越 · E 互動 · 滑鼠瞄準 · 左鍵射擊 · 右鍵 ADS · R 換彈 · F 檢視 · V 近戰 · 1–5 換槍 · ESC 暫停</p>
+      <p class="controls">WASD 移動 · Shift 衝刺 · Ctrl 蹲下 · Space 跳躍／翻越 · E 互動 · 滑鼠瞄準 · 左鍵射擊 · 右鍵 ADS · R 換彈 · F 檢視 · V 近戰 · 1–5／滾輪 換槍 · ESC 暫停</p>
       <p id="release-version" class="release-version"></p></footer>
     </main>
 
@@ -187,7 +187,9 @@
 
     <section id="loadout-panel" class="panel modal hidden">
       <p class="eyebrow">FIELD KIT</p><h2>Loadout</h2>
+      <p class="field-help">設定會自動保存在此瀏覽器，供下一場一般行動使用；每日挑戰使用指定裝備。</p>
       <div id="loadout-slots" class="settings-grid"></div>
+      <p id="loadout-summary" class="field-help"></p>
       <button class="close-menu-panel primary">確認</button>
     </section>
 
@@ -195,6 +197,11 @@
       <p class="eyebrow">WEAPON DATABASE</p><h2>Armory</h2>
       <label for="armory-search">搜尋武器、類別或配件</label>
       <input id="armory-search" type="search" placeholder="例如：RIFLE、SMG、Scope" autocomplete="off" />
+      <div class="armory-tools">
+        <label for="armory-category">裝備類別<select id="armory-category"><option value="all">全部裝備</option></select></label>
+        <label for="armory-slot">裝備至欄位<select id="armory-slot"><option value="0">01 · 按鍵 1</option><option value="1">02 · 按鍵 2</option><option value="2">03 · 按鍵 3</option><option value="3">04 · 按鍵 4</option><option value="4">05 · 按鍵 5</option></select></label>
+      </div>
+      <p id="armory-status" role="status" class="field-help"></p>
       <p id="armory-count" class="field-help" role="status"></p>
       <p id="armory-empty" class="hidden">沒有符合的裝備，請調整或清除搜尋文字。</p>
       <div id="armory-list" class="catalog-grid"></div>
@@ -246,7 +253,7 @@
     <section id="controls-panel" class="panel modal hidden">
       <p class="eyebrow">FIELD MANUAL</p>
       <h2>Controls</h2>
-      <p class="control-list">WASD — 移動<br />Shift — 衝刺<br />Ctrl — 蹲下<br />Space — 跳躍／翻越<br />E — 互動<br />滑鼠 — 瞄準<br />左鍵 — 射擊<br />右鍵 — ADS<br />R — 換彈<br />F — 檢視武器<br />V — 近戰<br />1–5 — 換槍<br />ESC — 暫停</p>
+      <p class="control-list">WASD — 移動<br />Shift — 衝刺<br />Ctrl — 蹲下<br />Space — 跳躍／翻越<br />E — 互動<br />滑鼠 — 瞄準<br />左鍵 — 射擊<br />右鍵 — ADS<br />R — 換彈<br />F — 檢視武器<br />V — 近戰<br />1–5／滾輪 — 換槍<br />ESC — 暫停</p>
       <button id="close-controls" class="primary">返回</button>
     </section>
 
