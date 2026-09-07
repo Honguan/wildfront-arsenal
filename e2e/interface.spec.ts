@@ -143,6 +143,7 @@ test('unavailable local storage warns without preventing a playable run', async 
 for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 720 }]) {
   test(`menu and settings remain usable at ${viewport.width}x${viewport.height}`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
+    await page.addStyleTag({ content: 'h1, h2 { font-family: sans-serif; }' });
     const menu = page.locator('#menu');
     await expect(menu).toBeVisible();
     const dimensions = await menu.evaluate((element) => {
@@ -152,6 +153,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 720 
     expect(dimensions.left).toBeGreaterThanOrEqual(0);
     expect(dimensions.right).toBeLessThanOrEqual(viewport.width);
     expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.width);
+    expect(await menu.locator('h1').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
     if (viewport.width === 390) await page.screenshot({ path: testInfo.outputPath('menu-mobile.png') });
 
     await page.locator('#menu-settings').click();

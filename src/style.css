@@ -184,7 +184,7 @@ small { color: #9aaa9f; font-size: .75rem; letter-spacing: .18em; }
   .hud-top div { flex: 1; min-width: 4.5rem; padding: .4rem; }
   .hud-top div:last-child { flex-basis: 100%; }
   #message { width: 90%; text-align: center; }
-  h1 { font-size: 4rem; }
+  h1 { font-size: clamp(2rem, 12vw, 4rem); }
   .upgrade-grid { grid-template-columns: 1fr; }
   .setup-grid { grid-template-columns: 1fr; }
   .upgrade-grid button { min-height: 5rem; }
